@@ -1,7 +1,7 @@
-// وحدة الحماية السحابية، التشفير، الدمج الذكي للدرجات، والنسخ الاحتياطية في Supabase
+// وحدة الحماية السحابية، التشفير (SHA-256)، الدمج الذكي للدرجات، والنسخ الاحتياطية السحابية
 // الميزانية القصوى: 350 سطر
 
-// دالة تجزئة وتشفير الرمز السري للسحابة (SHA-256 مع بديل محلي متوافق)
+// دالة تجزئة وتشفير الرمز السري للسحابة (SHA-256 مع بديل متوافق)
 async function computeCloudPinHash(pin, schoolCode) {
   const cleanPin = String(pin || '').trim();
   if (!cleanPin) return '';
@@ -16,7 +16,6 @@ async function computeCloudPinHash(pin, schoolCode) {
     }
   } catch (e) {}
 
-  // بديل تشفير دالي سريع في حال فتح الملف محلياً بدون HTTPS
   let h1 = 0xdeadbeef ^ rawText.length;
   let h2 = 0x41c6ce57 ^ rawText.length;
   for (let i = 0, ch; i < rawText.length; i++) {
@@ -41,10 +40,10 @@ function smartMergeCloudPayload(remotePayload, localPayload, preferLocalDeletion
       : (remotePayload.rooms || []),
     students: [],
     grades: {},
-    subjectDetails: {}
+    subjectDetails: {},
+    _security: remotePayload._security || {}
   };
 
-  // إذا كان اسم المدرسة في الجهاز المحلي افتراضياً وفي السحابة اسم رسمي، نحافظ على الاسم الرسمي
   if (
     (!localPayload.config?.schoolName || localPayload.config.schoolName === 'مدرسة ميزان النموذجية') &&
     remotePayload.config?.schoolName
@@ -59,7 +58,7 @@ function smartMergeCloudPayload(remotePayload, localPayload, preferLocalDeletion
   // درع منع المسح: إذا كان الجهاز المحلي فارغاً والسحابة فيها طلبة، نأخذ طلبة السحابة
   if (localStudents.length === 0 && remoteStudents.length > 0 && !preferLocalDeletions) {
     merged.students = JSON.parse(JSON.stringify(remoteStudents));
-  } else if (preferLocalDeletions) {
+  } else if (preferLocalDeletions && localStudents.length > 0) {
     merged.students = JSON.parse(JSON.stringify(localStudents));
   } else {
     const studentMap = new Map();
@@ -127,6 +126,41 @@ function smartMergeCloudPayload(remotePayload, localPayload, preferLocalDeletion
   return merged;
 }
 
+// بناء سجل النسخ الاحتياطية السحابية المدمج داخل السحابة (يحفظ آخر 6 نسخ تلقائياً)
+function buildCloudSecurityMeta(remotePayload, pinHash, updatedBy, remoteUpdatedAt) {
+  const prevSec = (remotePayload && remotePayload._security) ? remotePayload._security : {};
+  const backups = Array.isArray(prevSec.backups) ? [...prevSec.backups] : [];
+
+  const remoteStudentsCount = Array.isArray(remotePayload?.students) ? remotePayload.students.length : 0;
+  if (remoteStudentsCount > 0) {
+    const lastBk = backups[0];
+    const nowMs = Date.now();
+    const lastMs = lastBk && lastBk.created_at ? new Date(lastBk.created_at).getTime() : 0;
+    // حفظ نسخة سحابية جديدة إذا مضى أكثر من 30 ثانية أو تغير عدد الطلبة
+    if (!lastBk || (nowMs - lastMs > 30000) || lastBk.studentsCount !== remoteStudentsCount) {
+      backups.unshift({
+        id: nowMs,
+        created_at: remoteUpdatedAt || new Date().toISOString(),
+        updated_by: updatedBy || 'الكنترول',
+        studentsCount: remoteStudentsCount,
+        snapshot: {
+          config: remotePayload.config,
+          rooms: remotePayload.rooms,
+          students: remotePayload.students,
+          grades: remotePayload.grades,
+          subjectDetails: remotePayload.subjectDetails
+        }
+      });
+    }
+  }
+
+  return {
+    pinHash: pinHash || prevSec.pinHash || '',
+    version: (Number(prevSec.version) || 0) + 1,
+    backups: backups.slice(0, 6)
+  };
+}
+
 // توليد ونسخ رابط دعوة الأساتذة السريع للاتصال بسحابة المدرسة بضغطة واحدة
 function copyTeacherInviteLink() {
   const code = (document.getElementById('cloudInputSchoolCode')?.value || cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase();
@@ -169,14 +203,13 @@ function applyCloudUrlParams() {
         }
       }
       saveCloudConfig();
-      // إزالة البارامترات والرمز السري من شريط العنوان لحماية الخصوصية
       const cleanUrl = window.location.origin + window.location.pathname;
       window.history.replaceState({}, document.title, cleanUrl);
     }
   } catch (e) {}
 }
 
-// جلب وعرض سجل النسخ الاحتياطية المحفوظة تلقائياً داخل سيرفر Supabase
+// جلب وعرض سجل النسخ الاحتياطية المحفوظة داخل سحابة Supabase
 async function loadCloudBackupsList() {
   const container = document.getElementById('cloudBackupsListContainer');
   if (!container) return;
@@ -184,28 +217,28 @@ async function loadCloudBackupsList() {
 
   const fullKey = getFullSchoolCloudKey();
   try {
-    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_backups?school_code=eq.${encodeURIComponent(fullKey)}&select=id,school_name,updated_by,created_at,payload&order=created_at.desc&limit=8`;
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=payload&limit=1`;
     const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
     if (!res.ok) {
-      container.innerHTML = '<div class="text-center py-2 text-amber-700 text-xs">لم يتم العثور على سجل نسخ احتياطية سحابية بعد.</div>';
+      container.innerHTML = '<div class="text-center py-2 text-amber-700 text-xs">تعذر قراءة سجل النسخ السحابية حالياً.</div>';
       return;
     }
     const rows = await res.json();
-    if (!Array.isArray(rows) || rows.length === 0) {
+    const backups = rows?.[0]?.payload?._security?.backups || [];
+    if (!Array.isArray(backups) || backups.length === 0) {
       container.innerHTML = '<div class="text-center py-2 text-slate-500 text-xs">لا توجد نسخ سحابية سابقة لهذا الرمز حتى الآن (تُحفظ تلقائياً عند كل تعديل).</div>';
       return;
     }
 
-    window._cachedCloudBackups = rows;
-    container.innerHTML = rows.map(row => {
-      const stCount = Array.isArray(row.payload?.students) ? row.payload.students.length : 0;
-      const dt = new Date(row.created_at).toLocaleString('ar-IQ');
+    window._cachedCloudBackups = backups;
+    container.innerHTML = backups.map(bk => {
+      const dt = new Date(bk.created_at).toLocaleString('ar-IQ');
       return `<div class="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 hover:border-indigo-300 text-[11px]">
         <div>
           <div class="font-bold text-slate-800"><i class="fa-solid fa-clock-rotate-left text-indigo-600 ml-1"></i> ${dt}</div>
-          <div class="text-slate-500">بواسطة: <b>${row.updated_by || 'الكنترول'}</b> | عدد الطلبة: <b>${stCount}</b></div>
+          <div class="text-slate-500">بواسطة: <b>${bk.updated_by || 'الكنترول'}</b> | عدد الطلبة: <b>${bk.studentsCount || 0}</b></div>
         </div>
-        <button onclick="restoreCloudBackupById(${row.id})" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 font-bold rounded-lg border border-indigo-200 transition">
+        <button onclick="restoreCloudBackupById(${bk.id})" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 font-bold rounded-lg border border-indigo-200 transition">
           ⏪ استرجاع
         </button>
       </div>`;
@@ -218,7 +251,7 @@ async function loadCloudBackupsList() {
 async function restoreCloudBackupById(backupId) {
   const rows = window._cachedCloudBackups || [];
   const target = rows.find(r => r.id === backupId);
-  if (!target || !target.payload) return;
+  if (!target || !target.snapshot) return;
 
   if (!confirm(`⚠️ هل أنت متأكد من استرجاع هذه النسخة السحابية المحمية بتاريخ (${new Date(target.created_at).toLocaleString('ar-IQ')})؟\nسيتم أخذ نقطة أمان محلية قبل الاسترجاع.`)) {
     return;
@@ -228,11 +261,11 @@ async function restoreCloudBackupById(backupId) {
     createSnapshot('نقطة أمان تلقائية قبل استرجاع نسخة احتياطية سحابية');
   }
 
-  appData.config = { ...appData.config, ...(target.payload.config || {}) };
-  appData.rooms = target.payload.rooms || appData.rooms;
-  appData.students = target.payload.students || [];
-  appData.grades = target.payload.grades || {};
-  appData.subjectDetails = target.payload.subjectDetails || {};
+  appData.config = { ...appData.config, ...(target.snapshot.config || {}) };
+  appData.rooms = target.snapshot.rooms || appData.rooms;
+  appData.students = target.snapshot.students || [];
+  appData.grades = target.snapshot.grades || {};
+  appData.subjectDetails = target.snapshot.subjectDetails || {};
 
   if (typeof saveCurrentProfile === 'function') saveCurrentProfile();
   if (typeof syncConfigUI === 'function') syncConfigUI();
@@ -246,6 +279,7 @@ async function restoreCloudBackupById(backupId) {
 
 window.computeCloudPinHash = computeCloudPinHash;
 window.smartMergeCloudPayload = smartMergeCloudPayload;
+window.buildCloudSecurityMeta = buildCloudSecurityMeta;
 window.copyTeacherInviteLink = copyTeacherInviteLink;
 window.applyCloudUrlParams = applyCloudUrlParams;
 window.loadCloudBackupsList = loadCloudBackupsList;

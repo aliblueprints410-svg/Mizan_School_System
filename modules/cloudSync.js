@@ -105,35 +105,48 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
 
   try {
     // 1. جلب السجل السحابي الحالي للتحقق من الرمز السري وإجراء الدمج الذكي غير المدمّر
-    const checkUrl = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=payload,pin_hash,updated_at&limit=1`;
+    const checkUrl = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=payload,updated_at,updated_by&limit=1`;
     const checkRes = await fetch(checkUrl, { headers: { 'apikey': cloudConfig.supabaseKey } });
 
-    let payloadToPush = appData;
+    let payloadToPush = { ...appData };
+    let remotePayload = null;
+    let remoteUpdatedAt = null;
+    let remoteUpdatedBy = null;
+
     if (checkRes.ok) {
       const existingRows = await checkRes.json();
       if (Array.isArray(existingRows) && existingRows.length > 0) {
         const remoteRow = existingRows[0];
-        if (remoteRow.pin_hash && remoteRow.pin_hash !== '' && remoteRow.pin_hash !== pinHash) {
+        remotePayload = remoteRow.payload;
+        remoteUpdatedAt = remoteRow.updated_at;
+        remoteUpdatedBy = remoteRow.updated_by;
+
+        const remotePinHash = remotePayload?._security?.pinHash || '';
+        if (remotePinHash && remotePinHash !== '' && remotePinHash !== pinHash) {
           updateCloudUiBadge('locked_pin', '🔒 الرمز السري للسحابة غير مطابق! تم رفض التعديل لحماية بيانات المدرسة.');
           if (!silent && typeof showToast === 'function') {
             showToast('🔒 الرمز السري للسحابة (PIN) غير صحيح! لا يمكن الكتابة فوق سجل المدرسة المحمي.', 'error');
           }
           return false;
         }
+
         // درع منع المسح من جهاز فارغ + دمج درجات المواد المتزامنة
-        if (!forceOverwrite && typeof smartMergeCloudPayload === 'function' && remoteRow.payload) {
-          const remoteCount = Array.isArray(remoteRow.payload.students) ? remoteRow.payload.students.length : 0;
+        if (!forceOverwrite && typeof smartMergeCloudPayload === 'function' && remotePayload) {
+          const remoteCount = Array.isArray(remotePayload.students) ? remotePayload.students.length : 0;
           const localCount = Array.isArray(appData.students) ? appData.students.length : 0;
           if (localCount === 0 && remoteCount > 0) {
-            // الجهاز المحلي فارغ بينما السحابة تحتوي على طلبة -> نسحب بدلاً من المسح!
             await pullFromCloud(true);
             return true;
           }
-          payloadToPush = smartMergeCloudPayload(remoteRow.payload, appData, true);
+          payloadToPush = smartMergeCloudPayload(remotePayload, appData, true);
           appData.grades = payloadToPush.grades;
           appData.subjectDetails = payloadToPush.subjectDetails;
         }
       }
+    }
+
+    if (typeof buildCloudSecurityMeta === 'function') {
+      payloadToPush._security = buildCloudSecurityMeta(remotePayload, pinHash, remoteUpdatedBy, remoteUpdatedAt);
     }
 
     const nowIso = new Date().toISOString();
@@ -141,10 +154,9 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
       school_code: fullKey,
       school_name: payloadToPush?.config?.schoolName || 'مدرسة ميزان',
       school_level: payloadToPush?.config?.schoolLevel || 'primary',
-      payload: forceOverwrite ? { ...payloadToPush, allowEmptyOverwrite: true } : payloadToPush,
+      payload: payloadToPush,
       updated_at: nowIso,
-      updated_by: cloudConfig.userName || 'الكنترول',
-      pin_hash: pinHash
+      updated_by: cloudConfig.userName || 'الكنترول'
     };
 
     const res = await fetch(`${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync`, {
@@ -220,7 +232,10 @@ async function pullFromCloud(silent = false) {
     }
 
     const cloudRecord = rows[0];
-    if (cloudRecord.pin_hash && cloudRecord.pin_hash !== '' && cloudRecord.pin_hash !== pinHash) {
+    const incomingData = cloudRecord.payload;
+    const remotePinHash = incomingData?._security?.pinHash || '';
+
+    if (remotePinHash && remotePinHash !== '' && remotePinHash !== pinHash) {
       updateCloudUiBadge('locked_pin', '🔒 هذا السجل محمي برمز سري (PIN). يرجى إدخال الرمز الصحيح في إعدادات السحابة.');
       if (!silent) {
         openCloudSyncModal();
@@ -229,7 +244,6 @@ async function pullFromCloud(silent = false) {
       return false;
     }
 
-    const incomingData = cloudRecord.payload;
     if (incomingData && typeof incomingData === 'object') {
       isPullingFromCloud = true;
       lastCloudUpdatedAt = cloudRecord.updated_at;
@@ -277,7 +291,7 @@ async function checkCloudForUpdates() {
 
   const fullKey = getFullSchoolCloudKey();
   try {
-    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=updated_at,updated_by,pin_hash&limit=1`;
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=updated_at,updated_by&limit=1`;
     const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
     if (!res.ok) return;
 
