@@ -130,7 +130,7 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
           return false;
         }
 
-        // درع منع المسح من جهاز فارغ + دمج درجات المواد المتزامنة
+        // درع منع المسح من جهاز فارغ + دمج الطلبة ودرجات المواد المتزامنة دون فقدان أي طالب
         if (!forceOverwrite && typeof smartMergeCloudPayload === 'function' && remotePayload) {
           const remoteCount = Array.isArray(remotePayload.students) ? remotePayload.students.length : 0;
           const localCount = Array.isArray(appData.students) ? appData.students.length : 0;
@@ -138,9 +138,11 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
             await pullFromCloud(true);
             return true;
           }
-          payloadToPush = smartMergeCloudPayload(remotePayload, appData, true);
+          payloadToPush = smartMergeCloudPayload(remotePayload, appData, false);
+          appData.students = payloadToPush.students;
           appData.grades = payloadToPush.grades;
           appData.subjectDetails = payloadToPush.subjectDetails;
+          if (typeof saveCurrentProfile === 'function') saveCurrentProfile();
         }
       }
     }

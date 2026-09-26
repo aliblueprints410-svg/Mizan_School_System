@@ -54,70 +54,91 @@ function smartMergeCloudPayload(remotePayload, localPayload, preferLocalDeletion
 
   const remoteStudents = Array.isArray(remotePayload.students) ? remotePayload.students : [];
   const localStudents = Array.isArray(localPayload.students) ? localPayload.students : [];
+  const idRemap = {};
 
-  // درع منع المسح: إذا كان الجهاز المحلي فارغاً والسحابة فيها طلبة، نأخذ طلبة السحابة
-  if (localStudents.length === 0 && remoteStudents.length > 0 && !preferLocalDeletions) {
-    merged.students = JSON.parse(JSON.stringify(remoteStudents));
-  } else if (preferLocalDeletions && localStudents.length > 0) {
+  // درع منع المسح الصارم: دمج قوائم الطلبة وعدم حذف أي طالب موجود في السحابة إلا عند الاسترجاع القسري الصريح
+  if (preferLocalDeletions) {
     merged.students = JSON.parse(JSON.stringify(localStudents));
   } else {
     const studentMap = new Map();
-    remoteStudents.forEach(st => { if (st && st.id) studentMap.set(st.id, { ...st }); });
-    localStudents.forEach(st => {
+    const nameKeyMap = new Map();
+    const makeKey = s => `${String(s.name || '').trim().replace(/\s+/g, ' ')}__${s.grade || ''}__${s.section || ''}`;
+
+    remoteStudents.forEach(st => {
       if (st && st.id) {
-        const existing = studentMap.get(st.id) || {};
-        studentMap.set(st.id, { ...existing, ...st });
+        studentMap.set(st.id, { ...st });
+        nameKeyMap.set(makeKey(st), st.id);
       }
     });
+
+    localStudents.forEach(st => {
+      if (!st || !st.id) return;
+      const nKey = makeKey(st);
+      const canonicalId = studentMap.has(st.id) ? st.id : (nameKeyMap.get(nKey) || st.id);
+      if (canonicalId !== st.id) idRemap[st.id] = canonicalId;
+      const existing = studentMap.get(canonicalId) || {};
+      studentMap.set(canonicalId, { ...existing, ...st, id: canonicalId });
+      nameKeyMap.set(nKey, canonicalId);
+    });
+
     merged.students = Array.from(studentMap.values());
   }
 
-  // دمج الدرجات مادة بمادة وفصلاً بفصل لمنع مسح عمل معلم آخر يعمل في نفس اللحظة
-  const rGrades = remotePayload.grades || {};
-  const lGrades = localPayload.grades || {};
-  const allStudentIds = new Set([...Object.keys(rGrades), ...Object.keys(lGrades)]);
-
-  allStudentIds.forEach(stId => {
-    merged.grades[stId] = {};
-    const rTerms = rGrades[stId] || {};
-    const lTerms = lGrades[stId] || {};
-    const allTerms = new Set([...Object.keys(rTerms), ...Object.keys(lTerms)]);
-
-    allTerms.forEach(term => {
-      merged.grades[stId][term] = { ...(rTerms[term] || {}) };
-      const lSubjs = lTerms[term] || {};
-      Object.keys(lSubjs).forEach(subj => {
-        const val = lSubjs[subj];
-        if (val !== undefined && val !== null && val !== '') {
-          merged.grades[stId][term][subj] = val;
-        }
-      });
+  // توحيد معرفات الدرجات في حال تطابق اسم الطالب والصف والشعبة بين جهازين
+  const normalizedLocalGrades = JSON.parse(JSON.stringify(localPayload.grades || {}));
+  const normalizedLocalDetails = JSON.parse(JSON.stringify(localPayload.subjectDetails || {}));
+  Object.keys(idRemap).forEach(oldId => {
+    const newId = idRemap[oldId];
+    if (normalizedLocalGrades[oldId]) {
+      normalizedLocalGrades[newId] = { ...(normalizedLocalGrades[newId] || {}), ...normalizedLocalGrades[oldId] };
+      delete normalizedLocalGrades[oldId];
+    }
+    Object.keys(normalizedLocalDetails).forEach(subj => {
+      if (normalizedLocalDetails[subj] && normalizedLocalDetails[subj][oldId]) {
+        normalizedLocalDetails[subj][newId] = {
+          ...(normalizedLocalDetails[subj][newId] || {}),
+          ...normalizedLocalDetails[subj][oldId]
+        };
+        delete normalizedLocalDetails[subj][oldId];
+      }
     });
   });
 
-  // دمج تفاصيل سجل المعلم (اليومي والتحريري) مادة بمادة
+  // دمج الدرجات النهائية مادة بمادة لكل طالب: grades[studentId][subjectId] = mark
+  const rGrades = remotePayload.grades || {};
+  const lGrades = normalizedLocalGrades;
+  const allStudentIds = new Set([...Object.keys(rGrades), ...Object.keys(lGrades)]);
+
+  allStudentIds.forEach(stId => {
+    merged.grades[stId] = { ...(rGrades[stId] || {}) };
+    const lSubjs = lGrades[stId] || {};
+    Object.keys(lSubjs).forEach(subj => {
+      const val = lSubjs[subj];
+      if (val !== undefined && val !== null && val !== '' && typeof val !== 'object') {
+        merged.grades[stId][subj] = val;
+      }
+    });
+  });
+
+  // دمج تفاصيل سجل المعلم (اليومي، الشهري، نصف السنة، النهائي): subjectDetails[subjectId][studentId]
   const rDetails = remotePayload.subjectDetails || {};
-  const lDetails = localPayload.subjectDetails || {};
-  const allDetailIds = new Set([...Object.keys(rDetails), ...Object.keys(lDetails)]);
+  const lDetails = normalizedLocalDetails;
+  const allSubjIds = new Set([...Object.keys(rDetails), ...Object.keys(lDetails)]);
 
-  allDetailIds.forEach(stId => {
-    merged.subjectDetails[stId] = {};
-    const rTerms = rDetails[stId] || {};
-    const lTerms = lDetails[stId] || {};
-    const allTerms = new Set([...Object.keys(rTerms), ...Object.keys(lTerms)]);
+  allSubjIds.forEach(subj => {
+    merged.subjectDetails[subj] = {};
+    const rStudMap = rDetails[subj] || {};
+    const lStudMap = lDetails[subj] || {};
+    const allDetailStudIds = new Set([...Object.keys(rStudMap), ...Object.keys(lStudMap)]);
 
-    allTerms.forEach(term => {
-      merged.subjectDetails[stId][term] = { ...(rTerms[term] || {}) };
-      const lSubjs = lTerms[term] || {};
-      Object.keys(lSubjs).forEach(subj => {
-        const obj = lSubjs[subj];
-        if (obj && typeof obj === 'object') {
-          const prev = merged.subjectDetails[stId][term][subj] || {};
-          merged.subjectDetails[stId][term][subj] = {
-            ...prev,
-            ...(obj.daily !== undefined && obj.daily !== '' ? { daily: obj.daily } : {}),
-            ...(obj.written !== undefined && obj.written !== '' ? { written: obj.written } : {})
-          };
+    allDetailStudIds.forEach(stId => {
+      const rObj = (rStudMap[stId] && typeof rStudMap[stId] === 'object') ? rStudMap[stId] : {};
+      const lObj = (lStudMap[stId] && typeof lStudMap[stId] === 'object') ? lStudMap[stId] : {};
+      merged.subjectDetails[subj][stId] = { ...rObj };
+      Object.keys(lObj).forEach(field => {
+        const v = lObj[field];
+        if (v !== undefined && v !== null && v !== '') {
+          merged.subjectDetails[subj][stId][field] = v;
         }
       });
     });

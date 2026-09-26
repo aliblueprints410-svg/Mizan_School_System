@@ -110,10 +110,13 @@ function downloadGradesTemplateExcel(targetSubjectId = null) {
     return;
   }
 
-  const select = document.getElementById('gradeFilterSelect') || document.getElementById('modalGradeFilterSelect');
+  const select = targetSubjectId
+    ? (document.getElementById('modalGradeFilterSelect') || document.getElementById('gradeFilterSelect'))
+    : (document.getElementById('gradeFilterSelect') || document.getElementById('modalGradeFilterSelect'));
   const val = select ? select.value : '';
   const [gradeVal, secVal] = (val && val.includes('-')) ? val.split('-') : ['1', 'أ'];
   const lvl = appData.config?.schoolLevel || 'primary';
+  const isLower = lvl === 'primary' && ['1', '2', '3', '4'].includes(String(gradeVal));
   const subjects = (typeof getSubjectsForGrade === 'function') ? getSubjectsForGrade(lvl, gradeVal) : ((window.SUBJECTS_BY_LEVEL && window.SUBJECTS_BY_LEVEL[lvl]) || []);
 
   const studs = (appData.students || []).filter(s => String(s.grade) === String(gradeVal) && s.section === secVal);
@@ -129,11 +132,21 @@ function downloadGradesTemplateExcel(targetSubjectId = null) {
 
   if (targetSubjectId) {
     const subInfo = (window.SUBJECTS_INFO && window.SUBJECTS_INFO[targetSubjectId]) || targetSubjectId;
-    rows.push(['رقم القيد', 'اسم الطالب', `درجة ${subInfo}`]);
-    studs.forEach(s => {
-      const curGrade = appData.grades?.[s.id]?.[targetSubjectId] ?? '';
-      rows.push([s.reg, s.name, curGrade]);
-    });
+    if (isLower) {
+      rows.push(['رقم القيد', 'اسم الطالب', 'نصف السنة', 'آخر السنة', `الدرجة النهائية (${subInfo})`]);
+      studs.forEach(s => {
+        const d = appData.subjectDetails?.[targetSubjectId]?.[s.id] || {};
+        const curGrade = appData.grades?.[s.id]?.[targetSubjectId] ?? '';
+        rows.push([s.reg, s.name, d.mid ?? '', d.final ?? '', curGrade]);
+      });
+    } else {
+      rows.push(['رقم القيد', 'اسم الطالب', 'يومي ف1', 'شهر1 ف1', 'شهر2 ف1', 'نصف السنة', 'يومي ف2', 'شهر1 ف2', 'شهر2 ف2', 'الامتحان النهائي', `الدرجة النهائية (${subInfo})`]);
+      studs.forEach(s => {
+        const d = appData.subjectDetails?.[targetSubjectId]?.[s.id] || {};
+        const curGrade = appData.grades?.[s.id]?.[targetSubjectId] ?? '';
+        rows.push([s.reg, s.name, d.daily1 ?? '', d.m1 ?? '', d.m2 ?? '', d.mid ?? '', d.daily2 ?? '', d.m3 ?? '', d.m4 ?? '', d.final ?? '', curGrade]);
+      });
+    }
   } else {
     const headerRow = ['رقم القيد', 'اسم الطالب'];
     subjects.forEach(s => headerRow.push(s.name));
@@ -191,33 +204,25 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
         subjectMap[s.name.trim()] = s.id;
         subjectMap[s.id] = s.id;
       });
-      subjectMap['اسلامية'] = 'islamic';
-      subjectMap['التربية الاسلامية'] = 'islamic';
-      subjectMap['الاسلامية'] = 'islamic';
-      subjectMap['عربي'] = 'arabic';
-      subjectMap['اللغة العربية'] = 'arabic';
-      subjectMap['قراءة'] = 'arabic';
-      subjectMap['القراءة'] = 'arabic';
-      subjectMap['انكليزي'] = 'english';
-      subjectMap['انجليزي'] = 'english';
-      subjectMap['الانكليزية'] = 'english';
-      subjectMap['اللغة الانكليزية'] = 'english';
-      subjectMap['اللغة الإنجليزية'] = 'english';
-      subjectMap['رياضيات'] = 'math';
-      subjectMap['الرياضيات'] = 'math';
-      subjectMap['علوم'] = 'science';
-      subjectMap['العلوم'] = 'science';
-      subjectMap['اجتماعيات'] = 'social';
-      subjectMap['الاجتماعيات'] = 'social';
-      subjectMap['اخلاقية'] = 'ethics';
-      subjectMap['التربية الاخلاقية'] = 'ethics';
-      subjectMap['رياضة'] = 'sport';
-      subjectMap['فنية'] = 'art';
+      Object.assign(subjectMap, {
+        'اسلامية': 'islamic', 'التربية الاسلامية': 'islamic', 'الاسلامية': 'islamic',
+        'عربي': 'arabic', 'اللغة العربية': 'arabic', 'قراءة': 'arabic', 'القراءة': 'arabic',
+        'انكليزي': 'english', 'انجليزي': 'english', 'الانكليزية': 'english', 'اللغة الانكليزية': 'english', 'اللغة الإنجليزية': 'english',
+        'رياضيات': 'math', 'الرياضيات': 'math', 'علوم': 'science', 'العلوم': 'science',
+        'اجتماعيات': 'social', 'الاجتماعيات': 'social', 'اخلاقية': 'ethics', 'التربية الاخلاقية': 'ethics',
+        'رياضة': 'sport', 'فنية': 'art'
+      });
 
-      let headerRowIdx = -1;
-      let nameCol = -1;
-      let regCol = -1;
+      const detailFieldMap = {
+        'يومي ف1': 'daily1', 'يومي 1': 'daily1', 'شهر1 ف1': 'm1', 'شهر 1 ف1': 'm1', 'شهر2 ف1': 'm2', 'شهر 2 ف1': 'm2',
+        'نصف السنة': 'mid', 'درجة نصف السنة': 'mid',
+        'يومي ف2': 'daily2', 'يومي 2': 'daily2', 'شهر1 ف2': 'm3', 'شهر 1 ف2': 'm3', 'شهر2 ف2': 'm4', 'شهر 2 ف2': 'm4',
+        'آخر السنة': 'final', 'اخر السنة': 'final', 'الامتحان النهائي': 'final', 'درجة آخر السنة': 'final'
+      };
+
+      let headerRowIdx = -1, nameCol = -1, regCol = -1;
       const colToSubject = {};
+      const colToDetailField = {};
 
       for (let r = 0; r < Math.min(10, jsonRows.length); r++) {
         const row = jsonRows[r];
@@ -230,6 +235,12 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
             headerRowIdx = r;
           } else if (str.includes('القيد') || str.includes('التسلسل') || str === 'ت') {
             regCol = cIdx;
+          } else if (forcedSubjectId && detailFieldMap[str]) {
+            colToDetailField[cIdx] = detailFieldMap[str];
+            headerRowIdx = r;
+          } else if (forcedSubjectId && (str.includes('الدرجة النهائية') || str.includes('المعدل النهائي'))) {
+            colToSubject[cIdx] = forcedSubjectId;
+            headerRowIdx = r;
           } else {
             for (let sName in subjectMap) {
               if (str === sName || str.includes(sName)) {
@@ -241,15 +252,12 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
           }
         });
 
-        if (nameCol !== -1 && (Object.keys(colToSubject).length > 0 || forcedSubjectId)) break;
+        if (nameCol !== -1 && (Object.keys(colToSubject).length > 0 || Object.keys(colToDetailField).length > 0 || forcedSubjectId)) break;
       }
 
-      if (nameCol === -1 && regCol === -1) {
-        nameCol = 1;
-        regCol = 0;
-      }
+      if (nameCol === -1 && regCol === -1) { nameCol = 1; regCol = 0; }
 
-      if (forcedSubjectId && Object.keys(colToSubject).length === 0) {
+      if (forcedSubjectId && Object.keys(colToSubject).length === 0 && Object.keys(colToDetailField).length === 0) {
         for (let r = (headerRowIdx !== -1 ? headerRowIdx + 1 : 1); r < Math.min(jsonRows.length, 5); r++) {
           const row = jsonRows[r];
           if (!row) continue;
@@ -262,49 +270,56 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
         }
       }
 
-      const studentMapByName = {};
-      const studentMapByReg = {};
+      const studentMapByName = {}, studentMapByReg = {};
       (appData.students || []).forEach(st => {
         studentMapByName[normalizeStudentName(st.name)] = st;
         if (st.reg) studentMapByReg[String(st.reg).trim()] = st;
       });
 
-      let updatedStudentsCount = 0;
-      let updatedMarksCount = 0;
+      let updatedStudentsCount = 0, updatedMarksCount = 0;
       const startRow = headerRowIdx !== -1 ? headerRowIdx + 1 : 0;
-
       if (!appData.grades) appData.grades = {};
+      if (!appData.subjectDetails) appData.subjectDetails = {};
 
       for (let r = startRow; r < jsonRows.length; r++) {
         const row = jsonRows[r];
         if (!Array.isArray(row) || row.length === 0) continue;
 
         let matchedStudent = null;
-
         if (regCol !== -1 && row[regCol] !== undefined) {
           const regStr = String(row[regCol]).trim();
           if (studentMapByReg[regStr]) matchedStudent = studentMapByReg[regStr];
         }
-
         if (!matchedStudent && nameCol !== -1 && row[nameCol]) {
-          const rawName = String(row[nameCol]).trim();
-          const normName = normalizeStudentName(rawName);
-          if (studentMapByName[normName]) {
-            matchedStudent = studentMapByName[normName];
-          } else {
+          const normName = normalizeStudentName(String(row[nameCol]).trim());
+          if (studentMapByName[normName]) matchedStudent = studentMapByName[normName];
+          else {
             for (let k in studentMapByName) {
-              if (k.startsWith(normName) || normName.startsWith(k)) {
-                matchedStudent = studentMapByName[k];
-                break;
-              }
+              if (k.startsWith(normName) || normName.startsWith(k)) { matchedStudent = studentMapByName[k]; break; }
             }
           }
         }
-
         if (!matchedStudent) continue;
 
         let stHasUpdate = false;
         if (!appData.grades[matchedStudent.id]) appData.grades[matchedStudent.id] = {};
+
+        if (forcedSubjectId && Object.keys(colToDetailField).length > 0) {
+          if (!appData.subjectDetails[forcedSubjectId]) appData.subjectDetails[forcedSubjectId] = {};
+          if (!appData.subjectDetails[forcedSubjectId][matchedStudent.id]) appData.subjectDetails[forcedSubjectId][matchedStudent.id] = {};
+          for (let colIdx in colToDetailField) {
+            const fKey = colToDetailField[colIdx];
+            const rawVal = row[colIdx];
+            if (rawVal !== undefined && rawVal !== null && rawVal !== '' && !isNaN(Number(rawVal))) {
+              appData.subjectDetails[forcedSubjectId][matchedStudent.id][fKey] = Math.min(100, Math.max(0, Math.round(Number(rawVal))));
+              stHasUpdate = true;
+              updatedMarksCount++;
+            }
+          }
+          if (stHasUpdate && typeof computeStudentSubjectFinal === 'function') {
+            computeStudentSubjectFinal(matchedStudent.id, forcedSubjectId);
+          }
+        }
 
         for (let colIdx in colToSubject) {
           const subId = colToSubject[colIdx];

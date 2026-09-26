@@ -31,8 +31,11 @@ function computeStudentSubjectFinal(studentId, subjectId) {
 
   if (!appData.grades) appData.grades = {};
   if (!appData.grades[studentId]) appData.grades[studentId] = {};
-  if (finalGrade !== null) appData.grades[studentId][normSub] = finalGrade;
-  else delete appData.grades[studentId][normSub];
+  if (finalGrade !== null) {
+    appData.grades[studentId][normSub] = finalGrade;
+  } else if (appData.grades[studentId][normSub] !== undefined && appData.grades[studentId][normSub] !== '') {
+    finalGrade = Number(appData.grades[studentId][normSub]);
+  }
 
   return { t1, t2, annual, finalGrade };
 }
