@@ -1,0 +1,125 @@
+body {
+  font-family: 'Cairo', sans-serif;
+}
+
+/* تحسين تجربة الطباعة الرسمية للسجلات والشهادات */
+@media print {
+  @page {
+    size: A4;
+    margin: 8mm 6mm;
+  }
+
+  .no-print, header, nav, button, input[type="file"] {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 10pt;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  main {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .print-area {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  th, td {
+    border: 1px solid #333 !important;
+    padding: 3px 5px !important;
+    color: black !important;
+    background-color: transparent !important;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  .page-break-avoid {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* عند طباعة شيت المادة من النافذة المنبثقة */
+  body:has(#subjectDetailModal:not(.hidden)) > *:not(#subjectDetailModal) {
+    display: none !important;
+  }
+
+  #subjectDetailModal:not(.hidden) {
+    position: static !important;
+    inset: auto !important;
+    background: white !important;
+    padding: 0 !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    border: none !important;
+  }
+
+  #subjectDetailModal:not(.hidden) > div {
+    max-width: 100% !important;
+    max-height: none !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* عند طباعة كروت النتائج والشهادات لأولياء الأمور */
+  body:has(#reportCardsModal:not(.hidden)) > *:not(#reportCardsModal) {
+    display: none !important;
+  }
+
+  #reportCardsModal:not(.hidden) {
+    position: static !important;
+    inset: auto !important;
+    background: white !important;
+    padding: 0 !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    border: none !important;
+  }
+
+  #reportCardsModal:not(.hidden) > div {
+    max-width: 100% !important;
+    max-height: none !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: white !important;
+  }
+
+  .report-card-item {
+    box-shadow: none !important;
+    border: 1.5px solid #222 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin-bottom: 12px !important;
+  }
+}

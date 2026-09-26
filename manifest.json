@@ -1,0 +1,23 @@
+{
+  "name": "منظومة ميزان للإدارة المدرسية والكنترول الذكي",
+  "short_name": "منظومة ميزان",
+  "description": "المنظومة المؤسسية الشاملة لإدارة السجلات المدرسية، رصد الدرجات، والكنترول",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1e1b4b",
+  "theme_color": "#312e81",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

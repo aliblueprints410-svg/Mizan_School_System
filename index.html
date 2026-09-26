@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#312e81">
+  <title>منظومة ميزان للإدارة المدرسية والكنترول الذكي</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="manifest" href="manifest.json">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
+
+  <!-- شريط العنوان العلوي والتنقل -->
+  <header class="bg-indigo-900 text-white shadow-lg no-print sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3 space-x-reverse">
+        <div class="w-10 h-10 rounded-xl overflow-hidden border border-amber-400/50 flex items-center justify-center shadow-lg shrink-0 bg-slate-950">
+          <img src="icon.png" alt="أيقونة منظومة ميزان" class="w-full h-full object-cover">
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded shadow-sm">منظومة ميزان</span>
+            <span class="text-[11px] bg-indigo-950/80 text-amber-300 font-mono font-bold px-2 py-0.5 rounded border border-amber-400/30 shadow-inner">v 1.0.6</span>
+            <h1 class="text-lg md:text-xl font-black tracking-wide" id="navSchoolName">إدارة مدرسة ...........................</h1>
+          </div>
+          <p class="text-xs text-indigo-200">المنظومة المؤسسية للإدارة المدرسية والكنترول والامتحانات الذكية</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button id="btnCloudSyncHeader" onclick="openCloudSyncModal()" class="px-3 py-1.5 bg-indigo-950/90 hover:bg-indigo-800 border border-indigo-400/30 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow" title="المزامنة السحابية المركزية (Supabase Cloud Sync)">
+          <i class="fa-solid fa-cloud text-emerald-400"></i> <span>السحابة</span>
+        </button>
+        <button id="btnQuickUndo" onclick="undoLastAction()" class="px-2.5 py-1.5 bg-indigo-800 hover:bg-indigo-700 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow" title="تراجع عن آخر عملية (Undo)">
+          <i class="fa-solid fa-rotate-left text-amber-400"></i> تراجع
+        </button>
+        <button onclick="openAuditModal()" class="px-2.5 py-1.5 bg-indigo-800 hover:bg-indigo-700 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow" title="سجل التدقيق ونقاط استعادة الأمان">
+          <i class="fa-solid fa-shield-halved text-amber-400"></i> درع الأمان
+        </button>
+        <button id="btnToggleControlLock" onclick="openControlLockModal()" class="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow" title="تشميع وقفل الكنترول لمنع أي تلاعب">
+          <i class="fa-solid fa-lock-open"></i> تشميع الكنترول
+        </button>
+        <button onclick="window.print()" class="px-2.5 py-1.5 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow">
+          <i class="fa-solid fa-print"></i> طباعة
+        </button>
+        <button onclick="exportToCSV()" class="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow" title="تصدير بيانات الطلبة إلى ملف CSV">
+          <i class="fa-solid fa-file-csv"></i> CSV
+        </button>
+        <button onclick="exportMasterSheetToExcel()" class="px-2.5 py-1.5 bg-teal-700 hover:bg-teal-600 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow" title="تصدير ماستر شيت الدرجات الكامل إلى ملف Excel">
+          <i class="fa-solid fa-file-excel"></i> إكسل (.xlsx)
+        </button>
+        <button onclick="exportFullBackupJSON()" class="px-2.5 py-1.5 bg-sky-700 hover:bg-sky-600 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow" title="حفظ نسخة احتياطية كاملة للمدرسة بملف آمن">
+          <i class="fa-solid fa-download"></i> نسخ احتياطي
+        </button>
+        <input type="file" id="backupFileInput" accept=".json" class="hidden" onchange="handleBackupImport(event)">
+        <button onclick="triggerImportBackup()" class="px-2.5 py-1.5 bg-cyan-700 hover:bg-cyan-600 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow" title="استرجاع نسخة احتياطية سابقة">
+          <i class="fa-solid fa-upload"></i> استرجاع
+        </button>
+        <button onclick="clearStudentsAndGradesOnly()" class="px-2.5 py-1.5 bg-amber-700 hover:bg-amber-800 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow" title="مسح الطلبة والدرجات لبدء سجل جديد">
+          <i class="fa-solid fa-user-xmark"></i> تفريغ السجل
+        </button>
+        <button onclick="resetDataPrompt()" class="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-600 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow" title="تهيئة النظام ومسح كافة البيانات المخزنة">
+          <i class="fa-solid fa-trash-can"></i> تهيئة
+        </button>
+      </div>
+    </div>
+
+    <!-- علامات التبويب للمحاور -->
+    <div class="bg-indigo-950 border-t border-indigo-800 px-4">
+      <div class="max-w-7xl mx-auto flex space-x-2 space-x-reverse overflow-x-auto py-2 text-sm font-medium">
+        <button onclick="switchTab('main-tab')" id="btn-main-tab" class="tab-btn px-4 py-1.5 rounded-md bg-amber-500 text-slate-900 font-bold transition flex items-center gap-2 whitespace-nowrap">
+          <i class="fa-solid fa-house"></i> الشاشة الرئيسية
+        </button>
+        <button onclick="switchTab('students-tab')" id="btn-students-tab" class="tab-btn px-4 py-1.5 rounded-md hover:bg-indigo-800 text-indigo-100 transition flex items-center gap-2 whitespace-nowrap">
+          <i class="fa-solid fa-user-plus"></i> إضافة طلبة
+        </button>
+        <button onclick="openGrandSheet()" id="btn-grades-tab" class="tab-btn px-4 py-1.5 rounded-md hover:bg-indigo-800 text-indigo-100 transition flex items-center gap-2 whitespace-nowrap">
+          <i class="fa-solid fa-table-list"></i> سجل درجات
+        </button>
+        <button onclick="switchTab('stats-tab')" id="btn-stats-tab" class="tab-btn px-4 py-1.5 rounded-md hover:bg-indigo-800 text-indigo-100 transition flex items-center gap-2 whitespace-nowrap">
+          <i class="fa-solid fa-chart-pie"></i> إحصائيات
+        </button>
+        <button onclick="switchTab('rooms-tab')" id="btn-rooms-tab" class="tab-btn px-4 py-1.5 rounded-md hover:bg-indigo-800 text-indigo-100 transition flex items-center gap-2 whitespace-nowrap">
+          <i class="fa-solid fa-person-shelter"></i> إدارة وتوزيع القاعات
+        </button>
+        <button onclick="switchTab('docs-tab'); renderOfficialDocsView();" id="btn-docs-tab" class="tab-btn px-4 py-1.5 rounded-md hover:bg-indigo-800 text-indigo-100 transition flex items-center gap-2 whitespace-nowrap">
+          <i class="fa-solid fa-file-contract"></i> الوثائق المدرسية الرسمية
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- جسم الصفحات -->
+  <main class="max-w-7xl mx-auto p-4 md:p-6 w-full flex-grow">
+    
+    <!-- شريط تنبيه تشميع وسد سجل الكنترول -->
+    <div id="controlLockBanner" class="hidden mb-6 p-4 bg-gradient-to-r from-amber-600 via-rose-600 to-amber-700 text-white rounded-xl shadow-lg flex items-center justify-between no-print border border-amber-300/30">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-xl text-amber-200">
+          <i class="fa-solid fa-lock animate-pulse"></i>
+        </div>
+        <div>
+          <h4 class="font-black text-sm">سجل الكنترول والدرجات مشمّع ومقفل رسمياً (وضع القراءة والطباعة فقط)</h4>
+          <p class="text-xs text-amber-100">تم تجميد تعديل الدرجات وحذف أو إضافة الطلبة لضمان الأمان والنزاهة المدرسية.</p>
+        </div>
+      </div>
+      <button onclick="openControlLockModal()" class="px-4 py-2 bg-white text-slate-900 hover:bg-amber-100 rounded-lg text-xs font-black transition flex items-center gap-1.5 shadow">
+        <i class="fa-solid fa-key text-amber-700"></i> فك تشميع الكنترول
+      </button>
+    </div>
+
+    <!-- 1. الشاشة الرئيسية -->
+    <section id="main-tab" class="tab-content space-y-6">
+      <div class="bg-white rounded-xl shadow-md p-6 border border-slate-200">
+        <div class="flex items-center justify-between pb-4 mb-4 border-b border-slate-200">
+          <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <i class="fa-solid fa-sliders text-indigo-600"></i> إعدادات الترويسة المدرسية
+          </h2>
+          <span class="text-xs bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full font-semibold">تُحفظ تلقائياً</span>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+          <div class="md:col-span-2">
+            <div class="flex items-center justify-between mb-1">
+              <label class="block font-semibold text-slate-700">اسم المدرسة:</label>
+              <span id="schoolGenderBadge" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 transition shadow-sm"></span>
+            </div>
+            <input type="text" id="cfgSchoolName" placeholder="مثال: مدرسة أمزا للبنين..." class="w-full border rounded-lg p-2.5 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+            <p class="text-[11px] text-slate-500 mt-1">💡 كتابة «للبنين» أو «للبنات» يقفل جنس الطلبة فوراً ويمنع أي لبس في الأسماء المشتركة.</p>
+          </div>
+          <div>
+            <label class="block font-semibold mb-1 text-slate-700">نوع المرحلة:</label>
+            <select id="cfgSchoolLevel" onchange="onSchoolLevelChange()" class="w-full border rounded-lg p-2.5 bg-slate-50 font-bold text-indigo-900 outline-none">
+              <option value="primary">ابتدائية</option>
+              <option value="middle">متوسطة</option>
+              <option value="high">إعدادية / ثانوية</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold mb-1 text-slate-700">جنس المدرسة والطلبة:</label>
+            <select id="cfgSchoolGender" class="w-full border rounded-lg p-2.5 bg-slate-50 font-bold text-slate-800 outline-none">
+              <option value="auto">كشف تلقائي (من اسم المدرسة)</option>
+              <option value="boys">مدرسة بنين (كافة الطلبة ذكور 100%)</option>
+              <option value="girls">مدرسة بنات (كافة الطالبات إناث 100%)</option>
+              <option value="mixed">مختلطة (كشف ذكي وتحديد فردي)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mt-4 pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+          <div>
+            <label class="block font-semibold mb-1 text-slate-700">مدير / مديرة المدرسة:</label>
+            <input type="text" id="cfgPrincipal" placeholder="اكتب اسم المدير..." class="w-full border rounded-lg p-2 bg-slate-50">
+          </div>
+          <div>
+            <label class="block font-semibold mb-1 text-slate-700">منظم السجل / المعاون:</label>
+            <input type="text" id="cfgSecretary" placeholder="اكتب اسم المنظم..." class="w-full border rounded-lg p-2 bg-slate-50">
+          </div>
+          <div>
+            <label class="block font-semibold mb-1 text-slate-700">العام الدراسي:</label>
+            <input type="text" id="cfgSchoolYear" placeholder="2026 - 2027 م" class="w-full border rounded-lg p-2 bg-slate-50 focus:bg-white outline-none">
+          </div>
+          <div>
+            <label class="block font-semibold mb-1 text-slate-700">الصف والشعبة الافتراضية:</label>
+            <div class="flex gap-2">
+              <select id="cfgActiveGrade" class="w-2/3 border rounded-lg p-2 bg-slate-50"></select>
+              <select id="cfgActiveSection" class="w-1/3 border rounded-lg p-2 bg-slate-50">
+                <option value="أ">أ</option>
+                <option value="ب">ب</option>
+                <option value="جـ">جـ</option>
+                <option value="د">د</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <!-- لوحة تحديد عدد الشعب لكل صف -->
+        <div class="mt-4 pt-4 border-t border-slate-200">
+          <h3 class="font-bold text-slate-800 text-sm mb-3 flex items-center gap-1.5">
+            <i class="fa-solid fa-layer-group text-indigo-600"></i> تحديد عدد الشُعب لكل صف دراسي:
+          </h3>
+          <div id="gradeSectionsSettingsGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+            <!-- تتولد ديناميكياً حسب نوع المدرسة -->
+          </div>
+        </div>
+      </div>
+
+
+      <!-- الملخص السريع -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
+        <div class="bg-indigo-600 text-white p-5 rounded-xl shadow flex items-center justify-between">
+          <div><p class="text-xs text-indigo-100 font-semibold">إجمالي الطلبة المسجلين</p><h3 class="text-3xl font-extrabold mt-1" id="dashTotalStudents">0</h3></div>
+          <i class="fa-solid fa-users text-4xl opacity-40"></i>
+        </div>
+        <div class="bg-blue-600 text-white p-5 rounded-xl shadow flex items-center justify-between">
+          <div><p class="text-xs text-blue-100 font-semibold">إجمالي الذكور (تلقائي)</p><h3 class="text-3xl font-extrabold mt-1" id="dashMaleStudents">0</h3></div>
+          <i class="fa-solid fa-mars text-4xl opacity-40"></i>
+        </div>
+        <div class="bg-pink-600 text-white p-5 rounded-xl shadow flex items-center justify-between">
+          <div><p class="text-xs text-pink-100 font-semibold">إجمالي الإناث (تلقائي)</p><h3 class="text-3xl font-extrabold mt-1" id="dashFemaleStudents">0</h3></div>
+          <i class="fa-solid fa-venus text-4xl opacity-40"></i>
+        </div>
+        <div class="bg-emerald-600 text-white p-5 rounded-xl shadow flex items-center justify-between">
+          <div><p class="text-xs text-emerald-100 font-semibold">إجمالي القاعات</p><h3 class="text-3xl font-extrabold mt-1" id="dashRoomsCount">0</h3></div>
+          <i class="fa-solid fa-door-closed text-4xl opacity-40"></i>
+        </div>
+      </div>
+
+      <!-- بطاقة معلومات المنظومة والمطور -->
+      <div class="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 shadow-xl border border-indigo-800/40 relative overflow-hidden">
+        <div class="absolute -left-10 -bottom-10 w-44 h-44 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        <div class="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div class="flex items-center gap-4">
+            <div class="w-16 h-16 rounded-2xl overflow-hidden border-2 border-amber-400/50 flex items-center justify-center shadow-2xl shrink-0 bg-slate-950">
+              <img src="icon.png" alt="شعار منظومة ميزان" class="w-full h-full object-cover">
+            </div>
+            <div>
+              <div class="flex flex-wrap items-center gap-2 mb-1">
+                <h3 class="text-lg md:text-xl font-black tracking-wide text-white">منظومة مـيـزان للإدارة المدرسية والكنترول الذكي</h3>
+                <span class="bg-amber-400 text-slate-950 font-mono font-black text-xs px-2.5 py-0.5 rounded-full shadow">v 1.0.6</span>
+              </div>
+              <p class="text-xs text-indigo-200 leading-relaxed">
+                المنظومة المؤسسية المعتمدة لإدارة شؤون الطلبة، الكنترول، رصد الدرجات وإصدار الوثائق الرسمية والماستر شيت.
+              </p>
+            </div>
+          </div>
+          <div class="bg-white/10 backdrop-blur-md rounded-xl p-3.5 border border-white/15 shrink-0 flex flex-col gap-2 min-w-[270px]">
+            <div class="flex items-center justify-between text-xs pb-2 border-b border-white/10">
+              <span class="text-indigo-200 flex items-center gap-1.5"><i class="fa-solid fa-user-gear text-amber-400"></i> المطور:</span>
+              <span class="font-black text-white text-sm">علي</span>
+            </div>
+            <div class="flex items-center justify-between text-xs gap-3">
+              <span class="text-indigo-200 flex items-center gap-1.5"><i class="fa-brands fa-telegram text-sky-400"></i> تليكرام:</span>
+              <a href="https://t.me/Ali_Muhammed_410" target="_blank" rel="noopener noreferrer" class="font-mono text-sky-300 hover:text-sky-200 font-bold underline transition flex items-center gap-1">
+                @Ali_Muhammed_410 <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+              </a>
+            </div>
+            <div class="flex items-center justify-between text-xs gap-3">
+              <span class="text-indigo-200 flex items-center gap-1.5"><i class="fa-brands fa-whatsapp text-emerald-400"></i> واتساب:</span>
+              <a href="https://wa.me/eng.ali410" target="_blank" rel="noopener noreferrer" class="font-mono text-emerald-300 hover:text-emerald-200 font-bold underline transition flex items-center gap-1">
+                eng.ali410 <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. إدخال واستيراد الطلبة -->
+    <section id="students-tab" class="tab-content hidden space-y-6">
+      <div class="bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-dashed border-indigo-300 rounded-xl p-6 no-print text-center">
+        <i class="fa-solid fa-file-excel text-4xl text-emerald-600 mb-2"></i>
+        <h3 class="font-black text-slate-800 text-lg">استيراد أسماء الطلبة من ملف إكسل (XLSX)</h3>
+        <p class="text-xs text-slate-600 max-w-xl mx-auto mt-1 mb-4">
+          يقرأ النظام الأسماء والصفوف والشعب بذكاء، ويولّد التسلسل آلياً مع كشف الجنس الفوري.
+        </p>
+        <input type="file" id="excelFileInput" accept=".xlsx, .xls" class="hidden" onchange="handleExcelUpload(event)">
+        <button onclick="document.getElementById('excelFileInput').click()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-6 rounded-lg shadow transition">
+          <i class="fa-solid fa-upload ml-1"></i> رفع ملف Excel
+        </button>
+        <div class="mt-3">
+          <span id="excelGenderPolicyNotice" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm bg-slate-100 text-slate-700 border border-slate-300">
+            جاري فحص سياسة جنس المدرسة...
+          </span>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow p-5 border border-slate-200 no-print">
+        <h3 class="font-bold text-slate-800 text-base mb-3 flex items-center gap-2">
+          <i class="fa-solid fa-user-plus text-indigo-600"></i> إضافة طالب يدوياً
+        </h3>
+        <form id="addStudentForm" onsubmit="addStudentManual(event)" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+          <div class="md:col-span-2">
+            <label class="block font-semibold mb-1">اسم الطالب/ة الكامل *</label>
+            <input type="text" id="manualStudentName" oninput="detectGenderPreview(this.value)" required placeholder="الاسم كاملاً..." class="w-full border rounded-lg p-2.5">
+          </div>
+          <div>
+            <label class="block font-semibold mb-1">الصف *</label>
+            <select id="manualGrade" class="w-full border rounded-lg p-2.5 bg-slate-50"></select>
+          </div>
+          <div>
+            <label class="block font-semibold mb-1">الشعبة *</label>
+            <select id="manualSection" class="w-full border rounded-lg p-2.5 bg-slate-50">
+              <option value="أ">أ</option><option value="ب">ب</option><option value="جـ">جـ</option><option value="د">د</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold mb-1">الجنس المكتشف</label>
+            <select id="manualGender" class="w-full border rounded-lg p-2.5 bg-slate-100 font-bold">
+              <option value="ذكر">ذكر</option><option value="أنثى">أنثى</option>
+            </select>
+          </div>
+          <div class="md:col-span-5 flex justify-between items-center mt-2 pt-3 border-t border-slate-100">
+            <span class="text-xs text-indigo-600 font-semibold" id="genderAutoHint">يتم وضع تسلسل تلقائياً.</span>
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg">إضافة</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="bg-white rounded-xl shadow border border-slate-200 overflow-hidden print-area">
+        <div class="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3">
+          <span class="font-black text-slate-800" id="studentsCountBadge">0 طالب</span>
+          <div class="flex items-center gap-2 no-print flex-wrap">
+            <input type="text" id="searchStudentInput" onkeyup="renderStudentsTable()" placeholder="بحث بالاسم أو التسلسل..." class="border rounded-lg px-3 py-1.5 text-sm bg-white">
+            <select id="filterGrade" onchange="renderStudentsTable()" class="border rounded-lg px-3 py-1.5 text-sm bg-white font-medium"></select>
+            <div class="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1">
+              <i class="fa-solid fa-arrow-down-a-z text-indigo-600 text-xs"></i>
+              <label for="sortStudentsSelect" class="text-xs font-bold text-slate-600">فرز:</label>
+              <select id="sortStudentsSelect" onchange="renderStudentsTable()" class="text-xs font-bold text-slate-800 bg-transparent outline-none cursor-pointer">
+                <option value="name-asc">أبجدياً بالاسم (أ - ي) تصاعدي</option>
+                <option value="name-desc">أبجدياً بالاسم (ي - أ) تنازلي</option>
+                <option value="grade-asc">حسب الصف والمرحلة (تصاعدي)</option>
+                <option value="grade-desc">حسب الصف والمرحلة (تنازلي)</option>
+                <option value="reg-asc">حسب رقم القيد والتسلسل</option>
+              </select>
+            </div>
+            <button onclick="applySortToStudentSequence()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-sm" title="إعادة ترقيم تسلسل الطلبة وتثبيته رسمياً وفق الفرز الحالي">
+              <i class="fa-solid fa-arrow-down-1-9"></i> تثبيت التسلسل
+            </button>
+            <button onclick="syncStudentsWithSchoolGenderPolicy(false)" class="px-3 py-1.5 bg-sky-50 text-sky-800 hover:bg-sky-100 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border border-sky-300 shadow-sm" title="توحيد جنس كافة الطلبة الحاليين فوراً لمطابقة سياسة جنس المدرسة">
+              <i class="fa-solid fa-venus-mars text-sky-600"></i> توحيد جنس الطلبة
+            </button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-right text-sm border-collapse">
+            <thead>
+              <tr class="bg-indigo-900 text-white text-xs text-center select-none">
+                <th class="p-3 w-16">ت</th>
+                <th class="p-3 w-28 bg-indigo-950 cursor-pointer hover:bg-indigo-800 transition" onclick="toggleSortColumn('reg')" title="انقر لفرز أرقام القيود">
+                  التسلسل/القيد <i class="fa-solid fa-sort text-[10px] opacity-70 ml-1"></i>
+                </th>
+                <th class="p-3 text-right cursor-pointer hover:bg-indigo-800 transition pr-4" onclick="toggleSortColumn('name')" title="انقر للفرز الأبجدي تصاعدي / تنازلي">
+                  اسم الطالب/ة الكامل <i class="fa-solid fa-sort text-[10px] opacity-70 ml-1"></i>
+                </th>
+                <th class="p-3 w-32 cursor-pointer hover:bg-indigo-800 transition" onclick="toggleSortColumn('grade')" title="انقر للفرز حسب الصف تصاعدي / تنازلي">
+                  الصف <i class="fa-solid fa-sort text-[10px] opacity-70 ml-1"></i>
+                </th>
+                <th class="p-3 w-20">الشعبة</th>
+                <th class="p-3 w-24">الجنس</th>
+                <th class="p-3 w-24 no-print">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="studentsTableBody" class="divide-y divide-slate-200"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. سجل درجات -->
+    <section id="grades-tab" class="tab-content hidden space-y-6">
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-4 items-center justify-between no-print">
+        <div class="flex items-center gap-3">
+          <label class="font-bold text-sm text-slate-700">الصف والشعبة:</label>
+          <select id="gradeFilterSelect" onchange="renderGradesSheet()" class="border rounded-lg px-3 py-1.5 text-sm bg-slate-50 font-bold text-indigo-900"></select>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- زر درجات القرار -->
+          <button id="btnToggleGrace" onclick="toggleGraceMarks()" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border shadow-sm">
+            <i class="fa-solid fa-scale-balanced"></i> درجات القرار (5 درجات)
+          </button>
+          <!-- زر كروت النتائج -->
+          <button onclick="openReportCardsModal()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow">
+            <i class="fa-solid fa-award"></i> طباعة كروت النتائج للطلبة
+          </button>
+          <!-- أزرار استيراد وتصدير ونماذج درجات الإكسل -->
+          <input type="file" id="excelGradesFileInput" accept=".xlsx, .xls" class="hidden" onchange="handleExcelGradesUpload(event)">
+          <button onclick="document.getElementById('excelGradesFileInput').click()" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow" title="استيراد وتفريغ درجات الطلبة آلياً من ملف Excel">
+            <i class="fa-solid fa-file-import"></i> استيراد درجات (Excel)
+          </button>
+          <button onclick="downloadGradesTemplateExcel()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow" title="تحميل نموذج Excel معبأ بأسماء طلبة الشعبة">
+            <i class="fa-solid fa-file-arrow-down"></i> كشف إكسل معبأ
+          </button>
+          <!-- زر تصدير إكسل حقيقي -->
+          <button onclick="exportMasterSheetToExcel()" class="px-3 py-1.5 bg-teal-700 hover:bg-teal-600 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow" title="تصدير ماستر شيت الدرجات الكامل إلى ملف Excel">
+            <i class="fa-solid fa-file-excel"></i> تصدير ماستر (.xlsx)
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow border border-slate-200 p-6 print-area">
+        <div class="text-center pb-4 mb-4 border-b border-slate-300">
+          <div class="flex justify-between items-center text-xs md:text-sm font-bold text-slate-700">
+            <span class="header-school-name">إدارة مدرسة: ...........................</span>
+            <span class="header-exam-type text-base font-black text-indigo-900">قائمة الدرجات</span>
+            <span class="header-school-year">للعام الدراسي 2026 - 2027 م</span>
+          </div>
+          <div class="mt-2 text-xs font-semibold text-slate-600 flex justify-center gap-8">
+            <span>الصف: <b id="printGradeTitle" class="text-indigo-900">-</b></span>
+            <span>الشعبة: <b id="printSectionTitle" class="text-indigo-900">-</b></span>
+            <span>تاريخ الرصد: <b id="printDateTitle">2026-09-23</b></span>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-center text-xs border-collapse border border-slate-600">
+            <thead id="gradesTableHead"></thead>
+            <tbody id="gradesTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. إحصائيات (استمارة الإحصاء + التحليلات والمؤشرات) -->
+    <section id="stats-tab" class="tab-content hidden space-y-6">
+      <div class="bg-white rounded-xl shadow border border-slate-200 p-6 print-area">
+        <div class="text-center mb-6 pb-4 border-b-2 border-slate-800">
+          <div class="flex justify-between items-center text-sm font-bold text-slate-700 mb-2">
+            <span class="header-school-name">إدارة مدرسة: ...........................</span>
+            <span class="header-school-year">للعام الدراسي 2026 - 2027 م</span>
+          </div>
+          <h2 class="text-xl md:text-2xl font-black text-slate-900">استمارة إحصاء أعداد طلبة المدرسة</h2>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-center text-xs md:text-sm border-collapse border border-slate-700">
+            <thead id="statsTableHead"></thead>
+            <tbody id="statsTableBody" class="font-medium text-slate-800"></tbody>
+            <tfoot id="statsTableFoot" class="bg-slate-100 font-black border-t-2 border-slate-800"></tfoot>
+          </table>
+        </div>
+        <div class="mt-8 flex justify-between items-center text-sm font-bold text-slate-800 px-8">
+          <div>منظم الإحصاء: <span class="header-secretary-name">....................</span></div>
+          <div>مدير / مديرة المدرسة: <span class="header-principal-name">....................</span></div>
+        </div>
+      </div>
+
+      <!-- لوحة شرف الأوائل -->
+      <div class="bg-white rounded-xl shadow border border-slate-200 p-6 no-print">
+        <div class="flex justify-between items-center pb-4 mb-4 border-b border-slate-200">
+          <h3 class="text-lg font-black text-slate-900 flex items-center gap-2">
+            <i class="fa-solid fa-trophy text-amber-500"></i> لوحة شرف الطلبة المتفوقين (العشرة الأوائل)
+          </h3>
+          <span class="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1 rounded-full font-bold">تحديث تلقائي فوري</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-center text-sm border-collapse">
+            <thead>
+              <tr class="bg-indigo-950 text-white text-xs">
+                <th class="p-2.5 w-24">الترتيب</th>
+                <th class="p-2.5 text-right pr-4">اسم الطالب المتفوق</th>
+                <th class="p-2.5 w-36">الصف والشعبة</th>
+                <th class="p-2.5 w-24">المجموع</th>
+                <th class="p-2.5 w-24 bg-emerald-900">المعدل</th>
+              </tr>
+            </thead>
+            <tbody id="analyticsTopStudentsList" class="divide-y divide-slate-100"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- الرسوم البيانية الإحصائية -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 no-print">
+        <div class="bg-white rounded-xl shadow border border-slate-200 p-6 flex flex-col justify-between">
+          <div>
+            <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-2">
+              <i class="fa-solid fa-chart-column text-indigo-600"></i> نسب النجاح في المواد الدراسية (%)
+            </h4>
+            <p class="text-xs text-slate-500 mb-4">مؤشر أداء الطلبة في كل مادة لاكتشاف المواد التي تحتاج إلى دعم</p>
+          </div>
+          <div class="h-64 flex items-center justify-center">
+            <canvas id="chartSubjectPassRate"></canvas>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow border border-slate-200 p-6 flex flex-col justify-between">
+          <div>
+            <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-2">
+              <i class="fa-solid fa-chart-pie text-indigo-600"></i> التوزيع العام للتقديرات والمستويات
+            </h4>
+            <p class="text-xs text-slate-500 mb-4">نسب درجات الطلبة بين: ممتاز، جيد جداً، جيد، متوسط، مقبول، وراسب</p>
+          </div>
+          <div class="h-64 flex items-center justify-center">
+            <canvas id="chartAppreciationDist"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. إدارة وتوزيع القاعات -->
+    <section id="rooms-tab" class="tab-content hidden space-y-6">
+      <div class="bg-white rounded-xl shadow p-5 border border-slate-200 no-print">
+        <div class="flex flex-wrap justify-between items-center gap-3 pb-3 mb-4 border-b border-slate-200">
+          <div>
+            <h3 class="font-black text-slate-800 text-lg flex items-center gap-2">
+              <i class="fa-solid fa-door-open text-indigo-600"></i> لوحة التحكم في القاعات الامتحانية
+            </h3>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <div id="roomGradeFilterSelectContainer" class="flex items-center"></div>
+            <button onclick="distributeStudentsToRooms()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg text-sm">
+              إعادة توزيع الطلبة
+            </button>
+            <button onclick="addNewRoom()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg text-sm">
+              إضافة قاعة جديدة
+            </button>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="roomsSettingsGrid"></div>
+      </div>
+
+      <div class="bg-white p-6 rounded-xl shadow border border-slate-200 print-area">
+        <div class="text-center pb-4 mb-6 border-b border-slate-300">
+          <span class="header-school-name block text-sm font-bold text-slate-700">إدارة مدرسة ........................</span>
+          <span class="text-base font-black text-slate-900">خرائط توزيع جلوس الطلبة للامتحانات</span>
+        </div>
+
+        <!-- تخطيط مرن: القاعات وبجانبها قائمة الانتظار -->
+        <div class="flex flex-col lg:flex-row gap-6 items-start">
+          
+          <!-- كروت القاعات الامتحانية (تأخذ المساحة الأكبر) -->
+          <div class="flex-1 w-full grid grid-cols-1 md:grid-cols-2 gap-6" id="roomsDisplayContainer"></div>
+
+          <!-- القائمة الجانبية للطلبة بدون مقاعد (تظهر تلقائياً عند وجود نقص) -->
+          <div id="unallocatedStudentsContainer" class="hidden w-full lg:w-80 bg-rose-50 border-2 border-rose-300 rounded-xl p-4 shadow-sm sticky top-4">
+            <div class="flex items-center justify-between mb-3 border-b border-rose-200 pb-2">
+              <div class="flex items-center gap-1.5 text-rose-800 font-bold text-sm">
+                <i class="fa-solid fa-triangle-exclamation text-rose-600"></i>
+                <span>طلبة بدون مقاعد</span>
+              </div>
+              <span id="unallocatedCountBadge" class="bg-rose-600 text-white font-black text-[11px] px-2 py-0.5 rounded-full"></span>
+            </div>
+            <p class="text-[11px] text-rose-700 mb-2 font-medium">سعة القاعات الحالية لا تكفي، هؤلاء الطلبة بحاجة لمقاعد:</p>
+            <div class="max-h-96 overflow-y-auto bg-white rounded-lg border border-rose-200">
+              <table class="w-full text-xs text-right border-collapse">
+                <thead class="sticky top-0 bg-rose-100 text-rose-900 font-bold">
+                  <tr>
+                    <th class="p-1.5 w-8 text-center border-b border-rose-200">ت</th>
+                    <th class="p-1.5 border-b border-rose-200">اسم الطالب</th>
+                    <th class="p-1.5 text-center border-b border-rose-200">الصف</th>
+                    <th class="p-1.5 text-center border-b border-rose-200">شعبة</th>
+                  </tr>
+                </thead>
+                <tbody id="unallocatedStudentsList" class="divide-y divide-rose-100"></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. تبويب الوثائق المدرسية الرسمية -->
+    <section id="docs-tab" class="tab-content hidden space-y-6">
+      <div class="bg-white rounded-xl shadow-md p-6 border border-slate-200 no-print">
+        <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200">
+          <div>
+            <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+              <i class="fa-solid fa-file-contract text-indigo-600"></i> حزمة الوثائق المدرسية الرسمية
+            </h2>
+            <p class="text-xs text-slate-500 mt-1">توليد وطباعة الوثائق والتأييدات وبطاقات الامتحان الرسمية بنقرة واحدة مع الباركود</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="window.print()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow flex items-center gap-1.5 transition">
+              <i class="fa-solid fa-print"></i> طباعة الوثيقة
+            </button>
+          </div>
+        </div>
+
+        <!-- أزرار اختيار نوع الوثيقة -->
+        <div class="flex flex-wrap gap-2 pt-4">
+          <button id="btn-doc-enrollment" onclick="switchDocType('enrollment')" class="doc-nav-btn px-4 py-2 rounded-lg font-bold text-xs md:text-sm bg-indigo-600 text-white transition flex items-center gap-2 shadow-sm">
+            <i class="fa-solid fa-certificate"></i> تأييد استمرار بالدوام
+          </button>
+          <button id="btn-doc-transfer" onclick="switchDocType('transfer')" class="doc-nav-btn px-4 py-2 rounded-lg font-bold text-xs md:text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 transition flex items-center gap-2">
+            <i class="fa-solid fa-arrow-right-arrow-left"></i> وثيقة نقل طالب
+          </button>
+          <button id="btn-doc-examPass" onclick="switchDocType('examPass')" class="doc-nav-btn px-4 py-2 rounded-lg font-bold text-xs md:text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 transition flex items-center gap-2">
+            <i class="fa-solid fa-id-card"></i> بطاقات الاشتراك بالامتحان
+          </button>
+        </div>
+
+        <!-- شريط التخصيص والفلاتر التفاعلية -->
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-3 pt-4 mt-4 border-t border-slate-100 text-xs">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">اختر الطالب المستهدف:</label>
+            <select id="docStudentSelect" onchange="renderOfficialDocsView()" class="w-full border rounded-lg p-2 bg-slate-50 font-bold text-indigo-900 outline-none"></select>
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">العام الدراسي:</label>
+            <input type="text" id="docSchoolYearInput" oninput="onDocSchoolYearChange(this.value)" placeholder="2026 - 2027 م" class="w-full border rounded-lg p-2 bg-slate-50 font-bold text-indigo-950 outline-none">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">تاريخ إصدار الوثيقة:</label>
+            <input type="date" id="docIssueDateInput" onchange="renderOfficialDocsView()" class="w-full border rounded-lg p-2 bg-slate-50 font-bold text-indigo-950 outline-none">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">الجهة المعنون إليها (للتأييد):</label>
+            <input type="text" id="docCustomDestination" oninput="renderOfficialDocsView()" value="إلى / من يهمه الأمر المحترم" class="w-full border rounded-lg p-2 bg-slate-50 outline-none">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">المدرسة المنقول إليها (للوثيقة):</label>
+            <input type="text" id="docTargetSchoolInput" oninput="renderOfficialDocsView()" placeholder="اكتب اسم المدرسة المنقول لها..." class="w-full border rounded-lg p-2 bg-slate-50 outline-none">
+          </div>
+        </div>
+      </div>
+
+      <!-- مساحة معاينة وطباعة الوثيقة -->
+      <div id="officialDocPreviewContainer" class="w-full">
+        <!-- تتولد الوثيقة هنا -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- نافذة منبثقة لسجل درجات المادة التفصيلي -->
+  <div id="subjectDetailModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
+      
+      <!-- ترويسة شيت المادة -->
+      <div class="bg-slate-900 text-white p-4 flex justify-between items-center no-print">
+        <div class="flex items-center gap-3">
+          <i class="fa-solid fa-book-open text-indigo-400 text-xl"></i>
+          <div>
+            <h3 id="modalSubjectTitle" class="text-base font-black">سجل درجات مادة: ...</h3>
+            <span id="modalSubjectSubtitle" class="text-xs text-slate-300">تفاصيل التقييم التكويني والنهائي</span>
+          </div>
+        </div>
+        <button onclick="closeSubjectModal()" class="text-slate-400 hover:text-white text-lg p-1">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- فلاتر المادة والصف والشعبة -->
+      <div class="p-3 bg-slate-100 border-b border-slate-200 flex flex-wrap gap-3 justify-between items-center text-xs no-print">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex items-center gap-1.5">
+            <label class="font-bold text-slate-700">المادة الدراسية:</label>
+            <select id="modalSubjectPicker" onchange="changeActiveSubjectFromPicker(this.value)" class="border-2 border-indigo-400 rounded-lg px-3 py-1 font-bold text-indigo-950 bg-indigo-50/70 focus:bg-white outline-none">
+            </select>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <label class="font-bold text-slate-700">الصف والشعبة:</label>
+            <select id="modalGradeFilterSelect" onchange="onModalGradeFilterChange()" class="border border-slate-300 rounded-lg px-3 py-1 font-bold text-indigo-900 bg-white outline-none">
+            </select>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="file" id="modalSubjectExcelInput" accept=".xlsx, .xls" class="hidden" onchange="handleModalSubjectExcelUpload(event)">
+          <button onclick="document.getElementById('modalSubjectExcelInput').click()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold shadow flex items-center gap-1" title="استيراد درجات هذه المادة حصراً من ملف إكسل">
+            <i class="fa-solid fa-file-import"></i> استيراد درجات المادة
+          </button>
+          <button onclick="downloadActiveSubjectTemplateExcel()" class="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg font-bold shadow flex items-center gap-1" title="تنزيل نموذج إكسل لهذه المادة معبأ بأسماء الطلبة">
+            <i class="fa-solid fa-file-arrow-down"></i> كشف المادة (Excel)
+          </button>
+          <button onclick="window.print()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg font-bold shadow flex items-center gap-1">
+            <i class="fa-solid fa-print"></i> طباعة شيت المادة
+          </button>
+        </div>
+      </div>
+
+      <!-- جدول التفاصيل -->
+      <div class="flex-1 overflow-auto p-4 print-area" id="subjectDetailTableContainer">
+        <!-- يتم توليده بالجافاسكريبت -->
+      </div>
+
+    </div>
+  </div>
+
+  <!-- نافذة منبثقة لمولّد شهادات وكروت النتائج لأولياء الأمور -->
+  <div id="reportCardsModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[95vh] flex flex-col overflow-hidden border border-slate-200">
+      
+      <!-- شريط العنوان -->
+      <div class="bg-indigo-900 text-white p-4 flex justify-between items-center no-print">
+        <div class="flex items-center gap-3">
+          <i class="fa-solid fa-award text-amber-400 text-2xl"></i>
+          <div>
+            <h3 class="text-base font-black">طباعة كروت وشهادات نتائج الطلبة لأولياء الأمور</h3>
+            <p class="text-xs text-indigo-200">توليد شهادات درجات رسمية مجهزة للقص والتوزيع الفوري</p>
+          </div>
+        </div>
+        <button onclick="closeReportCardsModal()" class="text-slate-400 hover:text-white text-lg p-1">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- شريط التصفية والتحكم -->
+      <div class="p-3 bg-slate-100 border-b border-slate-200 flex flex-wrap gap-4 justify-between items-center text-xs no-print">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex items-center gap-1.5">
+            <label class="font-bold text-slate-700">الصف والشعبة:</label>
+            <select id="reportCardFilterSelect" onchange="renderReportCardsSheet()" class="border border-slate-300 rounded px-2.5 py-1 font-bold text-indigo-900 bg-white"></select>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <label class="font-bold text-slate-700">تخطيط الورقة:</label>
+            <select id="reportCardLayoutType" onchange="renderReportCardsSheet()" class="border border-slate-300 rounded px-2.5 py-1 font-bold text-slate-800 bg-white">
+              <option value="grid4">كروت جماعية (4 كروت في ورقة A4 للقص)</option>
+              <option value="single">شهادة تفصيلية فردية فاخرة</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="window.print()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-lg font-bold shadow flex items-center gap-1.5">
+            <i class="fa-solid fa-print"></i> طباعة كروت النتائج
+          </button>
+        </div>
+      </div>
+
+      <!-- مساحة عرض وطباعة الكروت -->
+      <div class="flex-1 overflow-auto p-6 bg-slate-50 print-area">
+        <div id="reportCardsContainer">
+          <!-- تتولد كروت النتائج ديناميكياً هنا -->
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- نافذة درع الأمان وسجل التدقيق ونقاط الاستعادة -->
+  <div id="auditModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
+      <div class="bg-indigo-950 text-white p-4 flex justify-between items-center no-print">
+        <div class="flex items-center gap-3">
+          <i class="fa-solid fa-shield-halved text-amber-400 text-2xl"></i>
+          <div>
+            <h3 class="text-base font-black">درع الأمان وسجل التدقيق والتراجع الذكي</h3>
+            <p class="text-xs text-indigo-200">نقاط استعادة تلقائية (Snapshots) وسجل كامل للعمليات الحساسة</p>
+          </div>
+        </div>
+        <button onclick="closeAuditModal()" class="text-slate-400 hover:text-white text-lg p-1">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-auto p-6 space-y-6">
+        <div>
+          <div class="flex items-center justify-between mb-3 border-b pb-2">
+            <h4 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+              <i class="fa-solid fa-clock-rotate-left text-indigo-600"></i> نقاط الاستعادة المحفوظة (Auto-Snapshots)
+            </h4>
+            <span class="text-xs text-slate-500">تُنشأ تلقائياً قبل أي تعديل أو استيراد</span>
+          </div>
+          <div id="snapshotsListContainer" class="space-y-2"></div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-3 border-b pb-2">
+            <h4 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+              <i class="fa-solid fa-list-check text-indigo-600"></i> سجل تدقيق العمليات (Audit Trail)
+            </h4>
+            <button onclick="clearAuditLogs()" class="text-xs text-rose-600 hover:underline">إفراغ السجل</button>
+          </div>
+          <div id="auditLogsContainer"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- نافذة تشميع وقفل سجل الكنترول والدرجات -->
+  <div id="controlLockModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
+      <div class="bg-slate-900 text-white p-4 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-lock text-amber-400 text-xl"></i>
+          <h3 id="controlLockModalTitle" class="text-base font-black">تشميع وقفل الكنترول</h3>
+        </div>
+        <button onclick="closeControlLockModal()" class="text-slate-400 hover:text-white text-lg p-1">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="p-6 space-y-4">
+        <p id="controlLockModalDesc" class="text-xs text-slate-600 leading-relaxed">
+          سيتم تجميد كافة الدرجات ومنع أي تعديل أو استيراد. أدخل الرمز السري للمتابعة (الافتراضي: 1234):
+        </p>
+        <div>
+          <label class="block font-bold text-slate-700 text-xs mb-1">الرمز السري للكنترول (PIN):</label>
+          <input type="password" id="controlLockPinInput" placeholder="أدخل 4 أرقام أو الرمز..." class="w-full border-2 border-slate-300 rounded-xl p-2.5 text-center font-mono text-lg tracking-widest outline-none focus:border-indigo-600">
+        </div>
+        <button id="btnSubmitControlLock" onclick="handleControlLockSubmit()" class="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition shadow">
+          تأكيد
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- نافذة المزامنة السحابية المركزية (Supabase Cloud Sync) -->
+  <div id="cloudSyncModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200">
+      <div class="bg-gradient-to-r from-indigo-950 to-slate-900 text-white p-4 flex justify-between items-center">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400 text-lg">
+            <i class="fa-solid fa-cloud-arrow-up"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-black">المزامنة السحابية المركزية (Cloud Sync)</h3>
+            <p class="text-[11px] text-indigo-200">ربط حي ومباشر بين إدارة المدرسة والمعلمين عبر Supabase</p>
+          </div>
+        </div>
+        <button onclick="closeCloudSyncModal()" class="text-slate-400 hover:text-white text-lg p-1">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="p-5 space-y-4 text-xs max-h-[85vh] overflow-y-auto">
+        <!-- حالة الاتصال الحالية -->
+        <div class="p-3 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-between">
+          <span id="cloudModalStatusText" class="font-bold text-slate-700">جاري فحص حالة السحابة...</span>
+          <label class="flex items-center gap-1.5 cursor-pointer font-bold text-indigo-900">
+            <input type="checkbox" id="cloudInputEnabled" checked class="w-4 h-4 accent-indigo-600 rounded">
+            <span>تفعيل السحابة</span>
+          </label>
+        </div>
+
+        <!-- تنبيه تفعيل جدول SQL لأول مرة -->
+        <div id="cloudSqlSetupAlert" class="hidden p-3.5 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-950 space-y-2">
+          <div class="font-black flex items-center gap-1.5 text-amber-800">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> خطوة تفعيل الجدول السحابي (لأول مرة فقط):
+          </div>
+          <p class="leading-relaxed text-[11px]">
+            الاتصال بمشروع Supabase ناجح! لتفعيل حفظ الدرجات في السحابة، اضغط الزر أدناه لنسخ كود الجدول، ثم الصقه في <b>SQL Editor</b> داخل لوحة تحكم Supabase واضغط <b>RUN</b>:
+          </p>
+          <button onclick="copyCloudSetupSql()" class="w-full py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-lg shadow transition flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-copy"></i> نسخ كود تفعيل جدول السحابة (SQL)
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">رمز المدرسة المشترك (School Code):</label>
+            <input type="text" id="cloudInputSchoolCode" placeholder="مثال: AMZA-2026" class="w-full border-2 border-indigo-200 rounded-xl p-2 font-mono font-bold text-indigo-950 bg-indigo-50/40 focus:border-indigo-600 outline-none">
+            <span class="text-[10px] text-slate-500">يُشارك هذا الرمز مع المعلمين للربط بنفس السجل.</span>
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">اسم المستخدم / الصفة الحالية:</label>
+            <input type="text" id="cloudInputUserName" placeholder="مثال: أستاذ علي / الكنترول" class="w-full border border-slate-300 rounded-xl p-2 font-bold text-slate-800 focus:border-indigo-600 outline-none">
+            <span class="text-[10px] text-slate-500">يظهر عند إجراء تحديثات سحابية.</span>
+          </div>
+        </div>
+
+        <!-- إعدادات السيرفر المتقدمة -->
+        <details class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+          <summary class="font-bold text-slate-600 cursor-pointer select-none">⚙️ إعدادات اتصال مشروع Supabase (مُعبأة تلقائياً)</summary>
+          <div class="mt-3 space-y-2.5 pt-2 border-t border-slate-200">
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">رابط المشروع (Project URL):</label>
+              <input type="text" id="cloudInputUrl" dir="ltr" class="w-full border rounded-lg p-1.5 font-mono text-[11px] bg-white">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-600 mb-1">مفتاح الربط العام (Anon / Publishable Key):</label>
+              <input type="password" id="cloudInputKey" dir="ltr" class="w-full border rounded-lg p-1.5 font-mono text-[11px] bg-white">
+            </div>
+          </div>
+        </details>
+
+        <!-- أزرار المزامنة الفورية -->
+        <div class="grid grid-cols-2 gap-2.5 pt-1">
+          <button onclick="pushToCloud(false)" class="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition shadow flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-cloud-arrow-up"></i> رفع للسحابة الآن
+          </button>
+          <button onclick="pullFromCloud(false)" class="py-2.5 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold transition shadow flex items-center justify-center gap-1.5">
+            <i class="fa-solid fa-cloud-arrow-down"></i> سحب من السحابة الآن
+          </button>
+        </div>
+
+        <button onclick="saveCloudSettingsFromModal()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black transition shadow-md">
+          حفظ الإعدادات وتفعيل المزامنة التلقائية
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- شريط التذييل ومعلومات المنظومة والمطور -->
+  <footer class="mt-auto bg-slate-900 border-t border-slate-800 text-slate-400 py-4 px-4 text-xs no-print">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-right">
+      <div class="flex items-center gap-2.5 text-slate-300">
+        <i class="fa-solid fa-scale-balanced text-amber-400 text-base"></i>
+        <span class="font-bold text-white text-sm">منظومة ميزان للإدارة المدرسية والكنترول الذكي</span>
+        <span class="bg-indigo-950 text-amber-300 px-2 py-0.5 rounded border border-amber-400/30 font-mono font-bold text-[11px] shadow-inner">v 1.0.6</span>
+      </div>
+      <div class="flex flex-wrap items-center justify-center gap-3 text-slate-300">
+        <div class="flex items-center gap-1.5 bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/50">
+          <i class="fa-solid fa-code text-indigo-400"></i>
+          <span>المطور: <strong class="text-white">علي</strong></span>
+        </div>
+        <a href="https://t.me/Ali_Muhammed_410" target="_blank" rel="noopener noreferrer" class="flex items-center gap-1.5 text-sky-400 hover:text-sky-300 transition bg-sky-950/60 hover:bg-sky-900/80 px-2.5 py-1 rounded-lg border border-sky-800/40 font-mono text-xs">
+          <i class="fa-brands fa-telegram text-sky-400 text-sm"></i>
+          <span>@Ali_Muhammed_410</span>
+        </a>
+        <a href="https://wa.me/eng.ali410" target="_blank" rel="noopener noreferrer" class="flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 transition bg-emerald-950/60 hover:bg-emerald-900/80 px-2.5 py-1 rounded-lg border border-emerald-800/40 font-mono text-xs">
+          <i class="fa-brands fa-whatsapp text-emerald-400 text-sm"></i>
+          <span>eng.ali410</span>
+        </a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- استدعاء وحدات النظام النمطية المصغرة بالترتيب التراكمي السليم -->
+  <script src="modules/coreState.js"></script>
+  <script src="modules/subjectsConfig.js"></script>
+  <script src="modules/storage.js"></script>
+  <script src="modules/auditAndSnapshots.js"></script>
+  <script src="modules/controlLock.js"></script>
+  <script src="modules/header.js"></script>
+  <script src="modules/students.js"></script>
+  <script src="modules/grades.js"></script>
+  <script src="modules/graceMarks.js"></script>
+  <script src="modules/stats.js"></script>
+  <script src="modules/rooms.js"></script>
+  <script src="modules/reportCards.js"></script>
+  <script src="modules/officialDocs.js"></script>
+  <script src="modules/analytics.js"></script>
+  <script src="modules/excelExport.js"></script>
+  <script src="modules/cloudSync.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "name": "school-control-system",
+  "version": "1.0.0",
+  "description": "نظام الإدارة المدرسية وسجل الامتحانات والكنترول",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "keywords": [
+    "school",
+    "management",
+    "control",
+    "grades",
+    "iraq"
+  ],
+  "author": "School Administration System",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.2.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.school.controlsystem",
+    "productName": "نظام الإدارة المدرسية وسجل الامتحانات",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "../dist_desktop"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
+    }
+  }
+}

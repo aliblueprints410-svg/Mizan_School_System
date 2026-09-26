@@ -1,0 +1,31 @@
+# Cursor AI Rules - School System Architecture & Token Optimization
+
+## 🏗️ Architecture Overview
+This project adheres to a strict Micro-Modular Architecture (`modules/`).
+- `js/app.js`: Main bootstrap orchestrator ONLY (Strict limit: <= 100 lines).
+- `modules/*.js`: Discrete domain modules (Strict limit: <= 600 lines, target <= 450 lines).
+- `dist/bundle.js`: Automated build artifact. NEVER edit or read manually.
+
+## 🛡️ Strict AI Constraints
+1. **Surgical Edits Only**: Read and modify only the specific module responsible for the requested feature. Do not load unnecessary files into context to conserve tokens.
+2. **Never Touch Dist**: Edits to `dist/bundle.js` are strictly prohibited. Always edit the source file in `modules/` and run `node scripts/build.js`.
+3. **Preserve Global Contracts**: All functions attached to `window.*` must maintain their signatures and names to prevent breaking HTML event listeners.
+4. **Budget Enforcement**: Always verify changes by running `node scripts/check_budget.js`. Any file exceeding line limits fails the build.
+5. **State Mutation**: All state mutations go through `window.appData` and trigger `window.saveData()` or `window.render*()`.
+
+## 📁 Module Map
+- `modules/coreState.js`: `appData` state, sanitization (`escapeHtml`), toasts, theme.
+- `modules/subjectsConfig.js`: Educational stages, branches, subjects dictionary.
+- `modules/storage.js`: LocalStorage, IndexedDB offline persistence, backup JSON.
+- `modules/auditAndSnapshots.js`: Auto-snapshots, instant undo engine, and audit logging.
+- `modules/controlLock.js`: Official exam record lockdown & sealing mode with PIN protection.
+- `modules/header.js`: School header, academic year, stages/sections UI.
+- `modules/students.js`: Student records, gender auto-detection, Excel student import.
+- `modules/grades.js`: Grade entry, calculation, master roster sheet.
+- `modules/graceMarks.js`: Ministry 5-mark grace allocation engine.
+- `modules/stats.js`: Ministry student statistics dashboard.
+- `modules/rooms.js`: Exam room distribution and seating plans.
+- `modules/reportCards.js`: Printable student report cards (4 per A4).
+- `modules/officialDocs.js`: Official school document suite (Enrollment, Transfer, Exam Passes).
+- `modules/analytics.js`: Charts, academic analytics, top 10 honor board.
+- `modules/excelExport.js`: Official XLSX master sheet exporter.
