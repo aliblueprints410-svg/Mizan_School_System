@@ -1,0 +1,9 @@
+[build]
+  publish = "."
+  command = "node scripts/build.js"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
