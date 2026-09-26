@@ -39,6 +39,7 @@ const moduleOrder = [
   'officialDocs.js',
   'analytics.js',
   'excelExport.js',
+  'cloudSecurity.js',
   'cloudSync.js'
 ];
 

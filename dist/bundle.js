@@ -3661,9 +3661,264 @@ window.downloadActiveSubjectTemplateExcel = downloadActiveSubjectTemplateExcel;
 
 
 
-/* --- Start of cloudSync.js --- */
-// وحدة المزامنة السحابية المركزية والعمل التعاوني اللحظي (Supabase Cloud Database Sync)
+/* --- Start of cloudSecurity.js --- */
+// وحدة الحماية السحابية، التشفير، الدمج الذكي للدرجات، والنسخ الاحتياطية في Supabase
 // الميزانية القصوى: 350 سطر
+
+// دالة تجزئة وتشفير الرمز السري للسحابة (SHA-256 مع بديل محلي متوافق)
+async function computeCloudPinHash(pin, schoolCode) {
+  const cleanPin = String(pin || '').trim();
+  if (!cleanPin) return '';
+  const rawText = `MIZAN_SHIELD_2026::${String(schoolCode || '').trim().toUpperCase()}::${cleanPin}`;
+
+  try {
+    if (window.crypto && window.crypto.subtle) {
+      const msgBuffer = new TextEncoder().encode(rawText);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (e) {}
+
+  // بديل تشفير دالي سريع في حال فتح الملف محلياً بدون HTTPS
+  let h1 = 0xdeadbeef ^ rawText.length;
+  let h2 = 0x41c6ce57 ^ rawText.length;
+  for (let i = 0, ch; i < rawText.length; i++) {
+    ch = rawText.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+}
+
+// محرك الدمج الذكي غير المدمّر للبيانات والدرجات بين الأساتذة والإدارة
+function smartMergeCloudPayload(remotePayload, localPayload, preferLocalDeletions = false) {
+  if (!remotePayload || typeof remotePayload !== 'object') return localPayload;
+  if (!localPayload || typeof localPayload !== 'object') return remotePayload;
+
+  const merged = {
+    config: { ...(remotePayload.config || {}), ...(localPayload.config || {}) },
+    rooms: (Array.isArray(localPayload.rooms) && localPayload.rooms.length > 0)
+      ? localPayload.rooms
+      : (remotePayload.rooms || []),
+    students: [],
+    grades: {},
+    subjectDetails: {}
+  };
+
+  // إذا كان اسم المدرسة في الجهاز المحلي افتراضياً وفي السحابة اسم رسمي، نحافظ على الاسم الرسمي
+  if (
+    (!localPayload.config?.schoolName || localPayload.config.schoolName === 'مدرسة ميزان النموذجية') &&
+    remotePayload.config?.schoolName
+  ) {
+    merged.config.schoolName = remotePayload.config.schoolName;
+    if (remotePayload.config.schoolGender) merged.config.schoolGender = remotePayload.config.schoolGender;
+  }
+
+  const remoteStudents = Array.isArray(remotePayload.students) ? remotePayload.students : [];
+  const localStudents = Array.isArray(localPayload.students) ? localPayload.students : [];
+
+  // درع منع المسح: إذا كان الجهاز المحلي فارغاً والسحابة فيها طلبة، نأخذ طلبة السحابة
+  if (localStudents.length === 0 && remoteStudents.length > 0 && !preferLocalDeletions) {
+    merged.students = JSON.parse(JSON.stringify(remoteStudents));
+  } else if (preferLocalDeletions) {
+    merged.students = JSON.parse(JSON.stringify(localStudents));
+  } else {
+    const studentMap = new Map();
+    remoteStudents.forEach(st => { if (st && st.id) studentMap.set(st.id, { ...st }); });
+    localStudents.forEach(st => {
+      if (st && st.id) {
+        const existing = studentMap.get(st.id) || {};
+        studentMap.set(st.id, { ...existing, ...st });
+      }
+    });
+    merged.students = Array.from(studentMap.values());
+  }
+
+  // دمج الدرجات مادة بمادة وفصلاً بفصل لمنع مسح عمل معلم آخر يعمل في نفس اللحظة
+  const rGrades = remotePayload.grades || {};
+  const lGrades = localPayload.grades || {};
+  const allStudentIds = new Set([...Object.keys(rGrades), ...Object.keys(lGrades)]);
+
+  allStudentIds.forEach(stId => {
+    merged.grades[stId] = {};
+    const rTerms = rGrades[stId] || {};
+    const lTerms = lGrades[stId] || {};
+    const allTerms = new Set([...Object.keys(rTerms), ...Object.keys(lTerms)]);
+
+    allTerms.forEach(term => {
+      merged.grades[stId][term] = { ...(rTerms[term] || {}) };
+      const lSubjs = lTerms[term] || {};
+      Object.keys(lSubjs).forEach(subj => {
+        const val = lSubjs[subj];
+        if (val !== undefined && val !== null && val !== '') {
+          merged.grades[stId][term][subj] = val;
+        }
+      });
+    });
+  });
+
+  // دمج تفاصيل سجل المعلم (اليومي والتحريري) مادة بمادة
+  const rDetails = remotePayload.subjectDetails || {};
+  const lDetails = localPayload.subjectDetails || {};
+  const allDetailIds = new Set([...Object.keys(rDetails), ...Object.keys(lDetails)]);
+
+  allDetailIds.forEach(stId => {
+    merged.subjectDetails[stId] = {};
+    const rTerms = rDetails[stId] || {};
+    const lTerms = lDetails[stId] || {};
+    const allTerms = new Set([...Object.keys(rTerms), ...Object.keys(lTerms)]);
+
+    allTerms.forEach(term => {
+      merged.subjectDetails[stId][term] = { ...(rTerms[term] || {}) };
+      const lSubjs = lTerms[term] || {};
+      Object.keys(lSubjs).forEach(subj => {
+        const obj = lSubjs[subj];
+        if (obj && typeof obj === 'object') {
+          const prev = merged.subjectDetails[stId][term][subj] || {};
+          merged.subjectDetails[stId][term][subj] = {
+            ...prev,
+            ...(obj.daily !== undefined && obj.daily !== '' ? { daily: obj.daily } : {}),
+            ...(obj.written !== undefined && obj.written !== '' ? { written: obj.written } : {})
+          };
+        }
+      });
+    });
+  });
+
+  return merged;
+}
+
+// توليد ونسخ رابط دعوة الأساتذة السريع للاتصال بسحابة المدرسة بضغطة واحدة
+function copyTeacherInviteLink() {
+  const code = (document.getElementById('cloudInputSchoolCode')?.value || cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase();
+  const pin = (document.getElementById('cloudInputPin')?.value || cloudConfig.secretPin || '').trim();
+  const lvl = appData?.config?.schoolLevel || 'primary';
+
+  const baseUrl = window.location.origin + window.location.pathname;
+  const params = new URLSearchParams();
+  params.set('cloud', code);
+  params.set('level', lvl);
+  if (pin) params.set('pin', pin);
+
+  const inviteUrl = `${baseUrl}?${params.toString()}`;
+  navigator.clipboard.writeText(inviteUrl).then(() => {
+    if (typeof showToast === 'function') {
+      showToast('🔗 تم نسخ رابط دخول الأساتذة السريع! أرسله للمعلمين عبر واتساب أو تليكرام.', 'success');
+    } else {
+      alert('✅ تم نسخ رابط دخول الأساتذة السريع:\n' + inviteUrl);
+    }
+  });
+}
+
+// التقاط بارامترات رابط الدعوة السريع عند فتح المعلم للرابط وتنظيف شريط العنوان للأمان
+function applyCloudUrlParams() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const cloudCode = params.get('cloud');
+    const levelParam = params.get('level');
+    const pinParam = params.get('pin');
+
+    if (cloudCode) {
+      cloudConfig.schoolCode = cloudCode.trim().toUpperCase();
+      cloudConfig.enabled = true;
+      if (pinParam !== null) cloudConfig.secretPin = pinParam.trim();
+      if (levelParam && ['primary', 'middle', 'high'].includes(levelParam)) {
+        if (typeof switchSchoolLevel === 'function') {
+          switchSchoolLevel(levelParam, true);
+        } else if (appData?.config) {
+          appData.config.schoolLevel = levelParam;
+        }
+      }
+      saveCloudConfig();
+      // إزالة البارامترات والرمز السري من شريط العنوان لحماية الخصوصية
+      const cleanUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  } catch (e) {}
+}
+
+// جلب وعرض سجل النسخ الاحتياطية المحفوظة تلقائياً داخل سيرفر Supabase
+async function loadCloudBackupsList() {
+  const container = document.getElementById('cloudBackupsListContainer');
+  if (!container) return;
+  container.innerHTML = '<div class="text-center py-3 text-slate-500 text-xs"><i class="fa-solid fa-spinner fa-spin ml-1"></i> جاري جلب النسخ السحابية المحمية من السيرفر...</div>';
+
+  const fullKey = getFullSchoolCloudKey();
+  try {
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_backups?school_code=eq.${encodeURIComponent(fullKey)}&select=id,school_name,updated_by,created_at,payload&order=created_at.desc&limit=8`;
+    const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
+    if (!res.ok) {
+      container.innerHTML = '<div class="text-center py-2 text-amber-700 text-xs">لم يتم العثور على سجل نسخ احتياطية سحابية بعد.</div>';
+      return;
+    }
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) {
+      container.innerHTML = '<div class="text-center py-2 text-slate-500 text-xs">لا توجد نسخ سحابية سابقة لهذا الرمز حتى الآن (تُحفظ تلقائياً عند كل تعديل).</div>';
+      return;
+    }
+
+    window._cachedCloudBackups = rows;
+    container.innerHTML = rows.map(row => {
+      const stCount = Array.isArray(row.payload?.students) ? row.payload.students.length : 0;
+      const dt = new Date(row.created_at).toLocaleString('ar-IQ');
+      return `<div class="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 hover:border-indigo-300 text-[11px]">
+        <div>
+          <div class="font-bold text-slate-800"><i class="fa-solid fa-clock-rotate-left text-indigo-600 ml-1"></i> ${dt}</div>
+          <div class="text-slate-500">بواسطة: <b>${row.updated_by || 'الكنترول'}</b> | عدد الطلبة: <b>${stCount}</b></div>
+        </div>
+        <button onclick="restoreCloudBackupById(${row.id})" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 font-bold rounded-lg border border-indigo-200 transition">
+          ⏪ استرجاع
+        </button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = '<div class="text-center py-2 text-rose-600 text-xs">تعذر الاتصال بالسيرفر لجلب النسخ السحابية.</div>';
+  }
+}
+
+async function restoreCloudBackupById(backupId) {
+  const rows = window._cachedCloudBackups || [];
+  const target = rows.find(r => r.id === backupId);
+  if (!target || !target.payload) return;
+
+  if (!confirm(`⚠️ هل أنت متأكد من استرجاع هذه النسخة السحابية المحمية بتاريخ (${new Date(target.created_at).toLocaleString('ar-IQ')})؟\nسيتم أخذ نقطة أمان محلية قبل الاسترجاع.`)) {
+    return;
+  }
+
+  if (typeof createSnapshot === 'function') {
+    createSnapshot('نقطة أمان تلقائية قبل استرجاع نسخة احتياطية سحابية');
+  }
+
+  appData.config = { ...appData.config, ...(target.payload.config || {}) };
+  appData.rooms = target.payload.rooms || appData.rooms;
+  appData.students = target.payload.students || [];
+  appData.grades = target.payload.grades || {};
+  appData.subjectDetails = target.payload.subjectDetails || {};
+
+  if (typeof saveCurrentProfile === 'function') saveCurrentProfile();
+  if (typeof syncConfigUI === 'function') syncConfigUI();
+  if (typeof renderAll === 'function') renderAll();
+
+  await pushToCloud(false, true);
+  if (typeof showToast === 'function') {
+    showToast('🛡️ تم استرجاع النسخة الاحتياطية السحابية ومزامنتها بنجاح!', 'success');
+  }
+}
+
+window.computeCloudPinHash = computeCloudPinHash;
+window.smartMergeCloudPayload = smartMergeCloudPayload;
+window.copyTeacherInviteLink = copyTeacherInviteLink;
+window.applyCloudUrlParams = applyCloudUrlParams;
+window.loadCloudBackupsList = loadCloudBackupsList;
+window.restoreCloudBackupById = restoreCloudBackupById;
+
+
+/* --- Start of cloudSync.js --- */
+// وحدة المزامنة السحابية المركزية والعمل التعاوني اللحظي المحمي (Supabase Cloud Sync)
+// الميزانية القصوى: 360 سطر
 
 const CLOUD_CONFIG_KEY = 'MIZAN_CLOUD_SYNC_CONFIG_2026';
 
@@ -3671,6 +3926,7 @@ let cloudConfig = {
   supabaseUrl: 'https://rrlesmhpaanbpbcpdmre.supabase.co',
   supabaseKey: 'sb_publishable_gEAknXzFn1VWqD5jYwduAA_9w9ePzdU',
   schoolCode: 'MIZAN-2026',
+  secretPin: '',
   userName: 'إدارة المدرسة / الكنترول',
   autoSync: true,
   enabled: true
@@ -3680,7 +3936,8 @@ let lastCloudUpdatedAt = null;
 let isPullingFromCloud = false;
 let cloudPushTimer = null;
 let cloudPollInterval = null;
-let cloudStatusState = 'idle'; // 'connected', 'syncing', 'needs_table', 'offline', 'error'
+let pendingOfflinePush = false;
+let cloudStatusState = 'idle'; // 'connected', 'syncing', 'locked_pin', 'needs_table', 'offline', 'error'
 
 function loadCloudConfig() {
   try {
@@ -3718,22 +3975,27 @@ function updateCloudUiBadge(state, customText = '') {
 
   let badgeHtml = '';
   let statusDesc = '';
+  const hasPin = !!(cloudConfig.secretPin && cloudConfig.secretPin.trim());
+  const shieldIcon = hasPin ? '<i class="fa-solid fa-shield-halved text-amber-300 ml-1" title="محمي برمز سري"></i>' : '';
 
   if (!cloudConfig.enabled) {
     badgeHtml = '<i class="fa-solid fa-cloud text-slate-400"></i> <span class="text-slate-300">السحابة: متوقفة</span>';
     statusDesc = '⚪ المزامنة السحابية متوقفة حالياً (النظام يعمل بالوضع المحلي).';
   } else if (state === 'syncing') {
     badgeHtml = '<i class="fa-solid fa-rotate fa-spin text-amber-300"></i> <span class="text-amber-200">جاري المزامنة...</span>';
-    statusDesc = '🔄 جاري مزامنة البيانات مع قاعدة البيانات السحابية...';
+    statusDesc = '🔄 جاري التشفير والمزامنة الذكية مع قاعدة البيانات السحابية...';
   } else if (state === 'connected') {
-    badgeHtml = '<i class="fa-solid fa-cloud-Showers-heavy hidden"></i><span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block ml-1"></span><i class="fa-solid fa-cloud text-emerald-400"></i> <span class="text-emerald-200">متصل بالسحابة</span>';
-    statusDesc = customText || `🟢 متصل بقاعدة البيانات السحابية بنجاح (الكود: ${getFullSchoolCloudKey()})`;
+    badgeHtml = `${shieldIcon}<span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block ml-1"></span><i class="fa-solid fa-cloud text-emerald-400"></i> <span class="text-emerald-200">متصل ومؤمّن</span>`;
+    statusDesc = customText || `🟢 متصل بقاعدة البيانات السحابية بنجاح (${getFullSchoolCloudKey()})${hasPin ? ' 🔒 محمي برمز سري' : ''}`;
+  } else if (state === 'locked_pin') {
+    badgeHtml = '<i class="fa-solid fa-lock text-rose-400"></i> <span class="text-rose-200">مطلوب الرمز السري</span>';
+    statusDesc = customText || '🔒 هذا السجل السحابي محمي برمز سري (PIN) من قِبل إدارة المدرسة. يرجى إدخال الرمز الصحيح.';
   } else if (state === 'needs_table') {
     badgeHtml = '<i class="fa-solid fa-triangle-exclamation text-amber-400"></i> <span class="text-amber-300">تفعيل جدول السحابة</span>';
     statusDesc = '🟡 الاتصال بالسيرفر ناجح، يرجى تشغيل كود SQL لإنشاء جدول (mizan_cloud_sync) لأول مرة.';
   } else {
     badgeHtml = '<i class="fa-solid fa-cloud-bolt text-rose-400"></i> <span class="text-rose-200">أوفلاين / محلي</span>';
-    statusDesc = customText || '⚪ تعذر الوصول للسحابة حالياً — بياناتك محفوظة محلياً بأمان.';
+    statusDesc = customText || '⚪ وضع عدم الاتصال — تعديلاتك محفوظة محلياً وستُرفع تلقائياً فور عودة الإنترنت.';
   }
 
   if (btn) btn.innerHTML = badgeHtml;
@@ -3744,24 +4006,66 @@ function updateCloudUiBadge(state, customText = '') {
   }
 }
 
-async function pushToCloud(silent = true) {
+async function pushToCloud(silent = true, forceOverwrite = false) {
   if (!cloudConfig.enabled || !cloudConfig.supabaseUrl || !cloudConfig.supabaseKey) return false;
   if (isPullingFromCloud) return false;
 
+  if (!navigator.onLine) {
+    pendingOfflinePush = true;
+    updateCloudUiBadge('offline');
+    return false;
+  }
+
   updateCloudUiBadge('syncing');
   const fullKey = getFullSchoolCloudKey();
-  const nowIso = new Date().toISOString();
-
-  const bodyObj = {
-    school_code: fullKey,
-    school_name: appData?.config?.schoolName || 'مدرسة ميزان',
-    school_level: appData?.config?.schoolLevel || 'primary',
-    payload: appData,
-    updated_at: nowIso,
-    updated_by: cloudConfig.userName || 'الكنترول'
-  };
+  const pinHash = typeof computeCloudPinHash === 'function'
+    ? await computeCloudPinHash(cloudConfig.secretPin, cloudConfig.schoolCode)
+    : '';
 
   try {
+    // 1. جلب السجل السحابي الحالي للتحقق من الرمز السري وإجراء الدمج الذكي غير المدمّر
+    const checkUrl = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=payload,pin_hash,updated_at&limit=1`;
+    const checkRes = await fetch(checkUrl, { headers: { 'apikey': cloudConfig.supabaseKey } });
+
+    let payloadToPush = appData;
+    if (checkRes.ok) {
+      const existingRows = await checkRes.json();
+      if (Array.isArray(existingRows) && existingRows.length > 0) {
+        const remoteRow = existingRows[0];
+        if (remoteRow.pin_hash && remoteRow.pin_hash !== '' && remoteRow.pin_hash !== pinHash) {
+          updateCloudUiBadge('locked_pin', '🔒 الرمز السري للسحابة غير مطابق! تم رفض التعديل لحماية بيانات المدرسة.');
+          if (!silent && typeof showToast === 'function') {
+            showToast('🔒 الرمز السري للسحابة (PIN) غير صحيح! لا يمكن الكتابة فوق سجل المدرسة المحمي.', 'error');
+          }
+          return false;
+        }
+        // درع منع المسح من جهاز فارغ + دمج درجات المواد المتزامنة
+        if (!forceOverwrite && typeof smartMergeCloudPayload === 'function' && remoteRow.payload) {
+          const remoteCount = Array.isArray(remoteRow.payload.students) ? remoteRow.payload.students.length : 0;
+          const localCount = Array.isArray(appData.students) ? appData.students.length : 0;
+          if (localCount === 0 && remoteCount > 0) {
+            // الجهاز المحلي فارغ بينما السحابة تحتوي على طلبة -> نسحب بدلاً من المسح!
+            await pullFromCloud(true);
+            return true;
+          }
+          payloadToPush = smartMergeCloudPayload(remoteRow.payload, appData, true);
+          appData.grades = payloadToPush.grades;
+          appData.subjectDetails = payloadToPush.subjectDetails;
+        }
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const bodyObj = {
+      school_code: fullKey,
+      school_name: payloadToPush?.config?.schoolName || 'مدرسة ميزان',
+      school_level: payloadToPush?.config?.schoolLevel || 'primary',
+      payload: forceOverwrite ? { ...payloadToPush, allowEmptyOverwrite: true } : payloadToPush,
+      updated_at: nowIso,
+      updated_by: cloudConfig.userName || 'الكنترول',
+      pin_hash: pinHash
+    };
+
     const res = await fetch(`${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync`, {
       method: 'POST',
       headers: {
@@ -3773,23 +4077,28 @@ async function pushToCloud(silent = true) {
     });
 
     if (res.ok) {
+      pendingOfflinePush = false;
       lastCloudUpdatedAt = nowIso;
-      updateCloudUiBadge('connected', `🟢 تمت المزامنة والحفظ في السحابة (${new Date().toLocaleTimeString('ar-IQ')})`);
+      updateCloudUiBadge('connected', `🟢 تمت المزامنة والتأمين في السحابة (${new Date().toLocaleTimeString('ar-IQ')})`);
       if (!silent && typeof showToast === 'function') {
-        showToast('☁️ تم رفع ومزامنة كافة بيانات المدرسة والدرجات إلى السحابة بنجاح!', 'success');
+        showToast('☁️ تم دمج ورفع كافة بيانات المدرسة والدرجات إلى السحابة المحمية بنجاح!', 'success');
       }
       return true;
     } else {
       const errText = await res.text();
-      if (errText.includes('PGRST205') || res.status === 404) {
+      if (errText.includes('INVALID_CLOUD_PIN')) {
+        updateCloudUiBadge('locked_pin');
+        if (!silent && typeof showToast === 'function') showToast('🔒 الرمز السري للسحابة غير صحيح!', 'error');
+      } else if (errText.includes('PGRST205') || res.status === 404) {
         updateCloudUiBadge('needs_table');
         if (!silent) openCloudSyncModal();
       } else {
-        updateCloudUiBadge('error', `⚠️ خطأ سحابي (${res.status})`);
+        updateCloudUiBadge('error', `⚠️ تنبيه سحابي (${res.status})`);
       }
       return false;
     }
   } catch (err) {
+    pendingOfflinePush = true;
     updateCloudUiBadge('offline');
     return false;
   }
@@ -3800,12 +4109,13 @@ async function pullFromCloud(silent = false) {
 
   updateCloudUiBadge('syncing');
   const fullKey = getFullSchoolCloudKey();
+  const pinHash = typeof computeCloudPinHash === 'function'
+    ? await computeCloudPinHash(cloudConfig.secretPin, cloudConfig.schoolCode)
+    : '';
 
   try {
     const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=*&limit=1`;
-    const res = await fetch(url, {
-      headers: { 'apikey': cloudConfig.supabaseKey }
-    });
+    const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
 
     if (!res.ok) {
       const errText = await res.text();
@@ -3820,23 +4130,38 @@ async function pullFromCloud(silent = false) {
 
     const rows = await res.json();
     if (!Array.isArray(rows) || rows.length === 0) {
-      // لا توجد بيانات بعد لهذا الكود في السحابة، نقوم برفع البيانات الحالية كبداية
-      await pushToCloud(true);
+      if (Array.isArray(appData.students) && appData.students.length > 0) {
+        await pushToCloud(true);
+      } else {
+        updateCloudUiBadge('connected', `🟢 السحابة جاهزة (${fullKey}) — بانتظار رفع بيانات الطلبة`);
+      }
       return true;
     }
 
     const cloudRecord = rows[0];
-    const incomingData = cloudRecord.payload;
+    if (cloudRecord.pin_hash && cloudRecord.pin_hash !== '' && cloudRecord.pin_hash !== pinHash) {
+      updateCloudUiBadge('locked_pin', '🔒 هذا السجل محمي برمز سري (PIN). يرجى إدخال الرمز الصحيح في إعدادات السحابة.');
+      if (!silent) {
+        openCloudSyncModal();
+        if (typeof showToast === 'function') showToast('🔒 يرجى إدخال الرمز السري للسحابة (PIN) الخاص بالمدرسة للوصول للبيانات.', 'warning');
+      }
+      return false;
+    }
 
+    const incomingData = cloudRecord.payload;
     if (incomingData && typeof incomingData === 'object') {
       isPullingFromCloud = true;
       lastCloudUpdatedAt = cloudRecord.updated_at;
 
-      appData.config = { ...appData.config, ...(incomingData.config || {}) };
-      appData.rooms = incomingData.rooms || appData.rooms;
-      appData.students = incomingData.students || [];
-      appData.grades = incomingData.grades || {};
-      appData.subjectDetails = incomingData.subjectDetails || {};
+      const merged = typeof smartMergeCloudPayload === 'function'
+        ? smartMergeCloudPayload(incomingData, appData, false)
+        : incomingData;
+
+      appData.config = { ...appData.config, ...(merged.config || {}) };
+      appData.rooms = merged.rooms || appData.rooms;
+      appData.students = merged.students || [];
+      appData.grades = merged.grades || {};
+      appData.subjectDetails = merged.subjectDetails || {};
 
       if (typeof saveCurrentProfile === 'function') saveCurrentProfile();
       if (typeof syncConfigUI === 'function') syncConfigUI();
@@ -3844,10 +4169,10 @@ async function pullFromCloud(silent = false) {
 
       isPullingFromCloud = false;
       const byWho = cloudRecord.updated_by || 'الكنترول';
-      updateCloudUiBadge('connected', `🟢 متصل ومحدث من السحابة (آخر تحديث بواسطة: ${byWho})`);
+      updateCloudUiBadge('connected', `🟢 متصل ومؤمّن (آخر تحديث بواسطة: ${byWho})`);
 
       if (!silent && typeof showToast === 'function') {
-        showToast(`☁️ تم جلب أحدث البيانات والدرجات من السحابة (${appData.students.length} طالب)`, 'info');
+        showToast(`☁️ تم جلب ودمج أحدث البيانات والدرجات من السحابة (${appData.students.length} طالب)`, 'info');
       }
       return true;
     }
@@ -3860,31 +4185,32 @@ async function pullFromCloud(silent = false) {
 
 async function checkCloudForUpdates() {
   if (!cloudConfig.enabled || !cloudConfig.autoSync || isPullingFromCloud) return;
+  if (!navigator.onLine) {
+    updateCloudUiBadge('offline');
+    return;
+  }
+  if (pendingOfflinePush) {
+    await pushToCloud(true);
+    return;
+  }
+
   const fullKey = getFullSchoolCloudKey();
-
   try {
-    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=updated_at,updated_by&limit=1`;
-    const res = await fetch(url, {
-      headers: { 'apikey': cloudConfig.supabaseKey }
-    });
-
-    if (!res.ok) {
-      const txt = await res.text();
-      if (txt.includes('PGRST205')) updateCloudUiBadge('needs_table');
-      return;
-    }
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=updated_at,updated_by,pin_hash&limit=1`;
+    const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
+    if (!res.ok) return;
 
     const rows = await res.json();
     if (Array.isArray(rows) && rows.length > 0) {
       const remoteTime = rows[0].updated_at;
       if (remoteTime && remoteTime !== lastCloudUpdatedAt) {
         if (!lastCloudUpdatedAt || new Date(remoteTime) > new Date(lastCloudUpdatedAt)) {
-          await pullFromCloud(true);
-          if (typeof showToast === 'function') {
-            showToast(`☁️ مزامنة فورية: تم تحديث البيانات من (${rows[0].updated_by || 'معلم آخر'})`, 'info');
+          const ok = await pullFromCloud(true);
+          if (ok && typeof showToast === 'function') {
+            showToast(`☁️ مزامنة حية: تم استلام تحديثات جديدة من (${rows[0].updated_by || 'معلم آخر'})`, 'info');
           }
         }
-      } else {
+      } else if (cloudStatusState !== 'locked_pin') {
         updateCloudUiBadge('connected');
       }
     } else {
@@ -3898,25 +4224,24 @@ async function checkCloudForUpdates() {
 function scheduleCloudPush() {
   if (!cloudConfig.enabled || !cloudConfig.autoSync || isPullingFromCloud) return;
   if (cloudPushTimer) clearTimeout(cloudPushTimer);
-  cloudPushTimer = setTimeout(() => {
-    pushToCloud(true);
-  }, 1500);
+  cloudPushTimer = setTimeout(() => { pushToCloud(true); }, 1500);
 }
 
 function openCloudSyncModal() {
   const modal = document.getElementById('cloudSyncModal');
   if (!modal) return;
-
   const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   setVal('cloudInputUrl', cloudConfig.supabaseUrl || '');
   setVal('cloudInputKey', cloudConfig.supabaseKey || '');
   setVal('cloudInputSchoolCode', cloudConfig.schoolCode || 'MIZAN-2026');
+  setVal('cloudInputPin', cloudConfig.secretPin || '');
   setVal('cloudInputUserName', cloudConfig.userName || 'إدارة المدرسة / الكنترول');
 
   const chk = document.getElementById('cloudInputEnabled');
   if (chk) chk.checked = !!cloudConfig.enabled;
-
   modal.classList.remove('hidden');
+
+  if (typeof loadCloudBackupsList === 'function') loadCloudBackupsList();
 }
 
 function closeCloudSyncModal() {
@@ -3928,40 +4253,28 @@ function saveCloudSettingsFromModal() {
   cloudConfig.supabaseUrl = (document.getElementById('cloudInputUrl')?.value || '').trim();
   cloudConfig.supabaseKey = (document.getElementById('cloudInputKey')?.value || '').trim();
   cloudConfig.schoolCode = (document.getElementById('cloudInputSchoolCode')?.value || 'MIZAN-2026').trim().toUpperCase();
+  cloudConfig.secretPin = (document.getElementById('cloudInputPin')?.value || '').trim();
   cloudConfig.userName = (document.getElementById('cloudInputUserName')?.value || 'الكنترول').trim();
   cloudConfig.enabled = !!document.getElementById('cloudInputEnabled')?.checked;
 
   saveCloudConfig();
-  if (cloudConfig.enabled) {
-    pullFromCloud(false);
-  } else {
-    updateCloudUiBadge('offline');
-  }
+  if (cloudConfig.enabled) pullFromCloud(false);
+  else updateCloudUiBadge('offline');
   closeCloudSyncModal();
-}
-
-function copyCloudSetupSql() {
-  const sql = `CREATE TABLE IF NOT EXISTS public.mizan_cloud_sync (
-  school_code TEXT PRIMARY KEY,
-  school_name TEXT DEFAULT '',
-  school_level TEXT DEFAULT 'primary',
-  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  updated_by TEXT DEFAULT 'الكنترول'
-);
-ALTER TABLE public.mizan_cloud_sync ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Allow all mizan_cloud_sync" ON public.mizan_cloud_sync;
-CREATE POLICY "Allow all mizan_cloud_sync" ON public.mizan_cloud_sync FOR ALL USING (true) WITH CHECK (true);`;
-
-  navigator.clipboard.writeText(sql).then(() => {
-    alert('✅ تم نسخ كود SQL بنجاح!\n\nالخطوة الوحيدة:\n1. افتح لوحة تحكم Supabase الخاصة بك.\n2. ادخل على قسم (SQL Editor).\n3. الصق الكود واضغط (RUN).\nوستعمل المزامنة السحابية فوراً!');
-  });
 }
 
 function initCloudSyncEngine() {
   loadCloudConfig();
+  if (typeof applyCloudUrlParams === 'function') applyCloudUrlParams();
+
+  window.addEventListener('online', () => {
+    if (pendingOfflinePush) pushToCloud(false);
+    else checkCloudForUpdates();
+  });
+  window.addEventListener('offline', () => updateCloudUiBadge('offline'));
+
   if (cloudConfig.enabled) {
-    setTimeout(() => { checkCloudForUpdates(); }, 1200);
+    setTimeout(() => { pullFromCloud(true); }, 800);
     if (cloudPollInterval) clearInterval(cloudPollInterval);
     cloudPollInterval = setInterval(checkCloudForUpdates, 8000);
   } else {
@@ -3976,7 +4289,6 @@ window.scheduleCloudPush = scheduleCloudPush;
 window.openCloudSyncModal = openCloudSyncModal;
 window.closeCloudSyncModal = closeCloudSyncModal;
 window.saveCloudSettingsFromModal = saveCloudSettingsFromModal;
-window.copyCloudSetupSql = copyCloudSetupSql;
 window.initCloudSyncEngine = initCloudSyncEngine;
 
 

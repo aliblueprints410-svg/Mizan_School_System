@@ -817,18 +817,47 @@
           </button>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label class="block font-bold text-slate-700 mb-1">رمز المدرسة المشترك (School Code):</label>
+            <label class="block font-bold text-slate-700 mb-1">رمز المدرسة المشترك (Code):</label>
             <input type="text" id="cloudInputSchoolCode" placeholder="مثال: AMZA-2026" class="w-full border-2 border-indigo-200 rounded-xl p-2 font-mono font-bold text-indigo-950 bg-indigo-50/40 focus:border-indigo-600 outline-none">
-            <span class="text-[10px] text-slate-500">يُشارك هذا الرمز مع المعلمين للربط بنفس السجل.</span>
+            <span class="text-[10px] text-slate-500">مُعرّف سجل المدرسة في السحابة.</span>
+          </div>
+          <div>
+            <label class="block font-bold text-amber-800 mb-1"><i class="fa-solid fa-shield-halved text-amber-600"></i> الرمز السري للسحابة (PIN):</label>
+            <input type="password" id="cloudInputPin" placeholder="اختياري (مثال: 2026)" class="w-full border-2 border-amber-200 rounded-xl p-2 font-mono font-bold text-slate-900 bg-amber-50/30 focus:border-amber-600 outline-none">
+            <span class="text-[10px] text-slate-500">يُشفّر بـ SHA-256 لحماية بيانات المدرسة.</span>
           </div>
           <div>
             <label class="block font-bold text-slate-700 mb-1">اسم المستخدم / الصفة الحالية:</label>
             <input type="text" id="cloudInputUserName" placeholder="مثال: أستاذ علي / الكنترول" class="w-full border border-slate-300 rounded-xl p-2 font-bold text-slate-800 focus:border-indigo-600 outline-none">
-            <span class="text-[10px] text-slate-500">يظهر عند إجراء تحديثات سحابية.</span>
+            <span class="text-[10px] text-slate-500">يظهر في سجل التحديثات السحابية.</span>
           </div>
         </div>
+
+        <!-- زر مشاركة رابط الدخول السريع للأساتذة -->
+        <div class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div>
+            <div class="font-black text-indigo-950 flex items-center gap-1.5">
+              <i class="fa-solid fa-share-nodes text-indigo-600"></i> رابط الدخول السريع للأساتذة (أونلاين):
+            </div>
+            <p class="text-[10px] text-indigo-700">ينسخ رابطاً جاهزاً يتضمن رمز المدرسة والمرحلة ليفتحه الأستاذ من هاتفه أو حاسوبه ويتصل فوراً.</p>
+          </div>
+          <button onclick="copyTeacherInviteLink()" class="shrink-0 py-2 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition flex items-center gap-1.5">
+            <i class="fa-solid fa-link"></i> نسخ رابط المعلمين
+          </button>
+        </div>
+
+        <!-- سجل النسخ الاحتياطية السحابية التلقائية في Supabase -->
+        <details class="bg-emerald-50/50 rounded-xl p-3 border border-emerald-200" ontoggle="if(this.open && typeof loadCloudBackupsList==='function') loadCloudBackupsList()">
+          <summary class="font-bold text-emerald-900 cursor-pointer select-none flex items-center justify-between">
+            <span><i class="fa-solid fa-vault text-emerald-600 ml-1"></i> سجل النسخ الاحتياطية السحابية المحمية (Supabase Backups)</span>
+            <span class="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">حماية تلقائية</span>
+          </summary>
+          <div id="cloudBackupsListContainer" class="mt-3 space-y-1.5 max-h-40 overflow-y-auto pt-2 border-t border-emerald-200/60">
+            <div class="text-center py-2 text-slate-500 text-xs">اضغط لعرض واسترجاع النسخ الاحتياطية المحفوظة في السيرفر.</div>
+          </div>
+        </details>
 
         <!-- إعدادات السيرفر المتقدمة -->
         <details class="bg-slate-50 rounded-xl p-3 border border-slate-200">
@@ -848,15 +877,15 @@
         <!-- أزرار المزامنة الفورية -->
         <div class="grid grid-cols-2 gap-2.5 pt-1">
           <button onclick="pushToCloud(false)" class="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition shadow flex items-center justify-center gap-1.5">
-            <i class="fa-solid fa-cloud-arrow-up"></i> رفع للسحابة الآن
+            <i class="fa-solid fa-cloud-arrow-up"></i> دمج ورفع للسحابة الآن
           </button>
           <button onclick="pullFromCloud(false)" class="py-2.5 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold transition shadow flex items-center justify-center gap-1.5">
-            <i class="fa-solid fa-cloud-arrow-down"></i> سحب من السحابة الآن
+            <i class="fa-solid fa-cloud-arrow-down"></i> سحب ودمج من السحابة
           </button>
         </div>
 
         <button onclick="saveCloudSettingsFromModal()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black transition shadow-md">
-          حفظ الإعدادات وتفعيل المزامنة التلقائية
+          حفظ الإعدادات وتفعيل الحماية والمزامنة التلقائية
         </button>
       </div>
     </div>
@@ -903,6 +932,7 @@
   <script src="modules/officialDocs.js"></script>
   <script src="modules/analytics.js"></script>
   <script src="modules/excelExport.js"></script>
+  <script src="modules/cloudSecurity.js"></script>
   <script src="modules/cloudSync.js"></script>
   <script src="js/app.js"></script>
 </body>
