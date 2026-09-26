@@ -147,6 +147,8 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
       }
     }
 
+    payloadToPush._tenantCode = fullKey;
+    appData._tenantCode = fullKey;
     if (typeof buildCloudSecurityMeta === 'function') {
       payloadToPush._security = buildCloudSecurityMeta(remotePayload, pinHash, remoteUpdatedBy, remoteUpdatedAt);
     }
@@ -338,6 +340,7 @@ function openCloudSyncModal() {
   if (chk) chk.checked = !!cloudConfig.enabled;
   modal.classList.remove('hidden');
 
+  if (typeof renderSavedSchoolsSwitcher === 'function') renderSavedSchoolsSwitcher();
   if (typeof loadCloudBackupsList === 'function') loadCloudBackupsList();
 }
 
@@ -346,23 +349,33 @@ function closeCloudSyncModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-function saveCloudSettingsFromModal() {
+async function saveCloudSettingsFromModal() {
+  const oldCode = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase();
+  const newCode = (document.getElementById('cloudInputSchoolCode')?.value || 'MIZAN-2026').trim().toUpperCase().replace(/\s+/g, '-');
+  const newPin = (document.getElementById('cloudInputPin')?.value || '').trim();
+
   cloudConfig.supabaseUrl = (document.getElementById('cloudInputUrl')?.value || '').trim();
   cloudConfig.supabaseKey = (document.getElementById('cloudInputKey')?.value || '').trim();
-  cloudConfig.schoolCode = (document.getElementById('cloudInputSchoolCode')?.value || 'MIZAN-2026').trim().toUpperCase();
-  cloudConfig.secretPin = (document.getElementById('cloudInputPin')?.value || '').trim();
   cloudConfig.userName = (document.getElementById('cloudInputUserName')?.value || 'الكنترول').trim();
   cloudConfig.enabled = !!document.getElementById('cloudInputEnabled')?.checked;
 
-  saveCloudConfig();
-  if (cloudConfig.enabled) pullFromCloud(false);
-  else updateCloudUiBadge('offline');
+  if (newCode !== oldCode && typeof switchActiveSchoolCode === 'function') {
+    await switchActiveSchoolCode(newCode, '', newPin);
+  } else {
+    cloudConfig.schoolCode = newCode;
+    cloudConfig.secretPin = newPin;
+    saveCloudConfig();
+    if (typeof registerCurrentSchoolInList === 'function') registerCurrentSchoolInList();
+    if (cloudConfig.enabled) await pullFromCloud(false);
+    else updateCloudUiBadge('offline');
+  }
   closeCloudSyncModal();
 }
 
 function initCloudSyncEngine() {
   loadCloudConfig();
   if (typeof applyCloudUrlParams === 'function') applyCloudUrlParams();
+  appData._tenantCode = getFullSchoolCloudKey();
 
   window.addEventListener('online', () => {
     if (pendingOfflinePush) pushToCloud(false);
@@ -379,6 +392,7 @@ function initCloudSyncEngine() {
   }
 }
 
+window.getActiveSchoolCode = () => (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase().replace(/\s+/g, '-');
 window.loadCloudConfig = loadCloudConfig;
 window.pushToCloud = pushToCloud;
 window.pullFromCloud = pullFromCloud;

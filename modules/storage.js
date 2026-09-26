@@ -35,9 +35,11 @@ function syncDataToIndexedDB() {
   }
 }
 
-function getProfileKey(level) {
+function getProfileKey(level, customSchoolCode = null) {
   const base = window.STORAGE_KEY || 'SCHOOL_SYSTEM_MODULAR_2026';
-  return `${base}_profile_${level || 'primary'}`;
+  const code = (customSchoolCode || (typeof window.getActiveSchoolCode === 'function' ? window.getActiveSchoolCode() : 'MIZAN-2026')).trim().toUpperCase();
+  if (!code || code === 'MIZAN-2026') return `${base}_profile_${level || 'primary'}`;
+  return `${base}_profile_${code}_${level || 'primary'}`;
 }
 
 function getProfileData(level) {

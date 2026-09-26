@@ -312,9 +312,11 @@ function syncDataToIndexedDB() {
   }
 }
 
-function getProfileKey(level) {
+function getProfileKey(level, customSchoolCode = null) {
   const base = window.STORAGE_KEY || 'SCHOOL_SYSTEM_MODULAR_2026';
-  return `${base}_profile_${level || 'primary'}`;
+  const code = (customSchoolCode || (typeof window.getActiveSchoolCode === 'function' ? window.getActiveSchoolCode() : 'MIZAN-2026')).trim().toUpperCase();
+  if (!code || code === 'MIZAN-2026') return `${base}_profile_${level || 'primary'}`;
+  return `${base}_profile_${code}_${level || 'primary'}`;
 }
 
 function getProfileData(level) {
@@ -3710,10 +3712,17 @@ async function computeCloudPinHash(pin, schoolCode) {
   return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
 }
 
-// محرك الدمج الذكي غير المدمّر للبيانات والدرجات بين الأساتذة والإدارة
+// محرك الدمج الذكي غير المدمّر للبيانات والدرجات بين الأساتذة والإدارة (مع عزل تام بين المدارس المختلفة)
 function smartMergeCloudPayload(remotePayload, localPayload, preferLocalDeletions = false) {
   if (!remotePayload || typeof remotePayload !== 'object') return localPayload;
   if (!localPayload || typeof localPayload !== 'object') return remotePayload;
+
+  // عزل صارم بين المدارس: إذا كانت البيانات المحلية تخص كود مدرسة آخر مختلف عن السحابة، نمنع الدمج نهائياً
+  const rTenant = remotePayload._tenantCode || '';
+  const lTenant = localPayload._tenantCode || '';
+  if (rTenant && lTenant && rTenant !== lTenant) {
+    return JSON.parse(JSON.stringify(remotePayload));
+  }
 
   const merged = {
     config: { ...(remotePayload.config || {}), ...(localPayload.config || {}) },
@@ -3723,6 +3732,7 @@ function smartMergeCloudPayload(remotePayload, localPayload, preferLocalDeletion
     students: [],
     grades: {},
     subjectDetails: {},
+    _tenantCode: rTenant || lTenant || '',
     _security: remotePayload._security || {}
   };
 
@@ -3980,6 +3990,112 @@ async function restoreCloudBackupById(backupId) {
   }
 }
 
+// إدارة قائمة المدارس المعزولة على الجهاز (Multi-School Switcher)
+const SCHOOLS_REGISTRY_KEY = 'MIZAN_SCHOOLS_REGISTRY_2026';
+
+function getSavedSchoolsList() {
+  try {
+    return JSON.parse(localStorage.getItem(SCHOOLS_REGISTRY_KEY) || '[]');
+  } catch (e) { return []; }
+}
+
+function registerCurrentSchoolInList() {
+  try {
+    const code = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase();
+    const name = appData?.config?.schoolName || 'مدرسة غير مسماة';
+    const lvl = appData?.config?.schoolLevel || 'primary';
+    const list = getSavedSchoolsList().filter(item => item.code !== code);
+    list.unshift({ code, name, level: lvl, pin: cloudConfig.secretPin || '', updatedAt: Date.now() });
+    localStorage.setItem(SCHOOLS_REGISTRY_KEY, JSON.stringify(list.slice(0, 20)));
+  } catch (e) {}
+}
+
+function renderSavedSchoolsSwitcher() {
+  const box = document.getElementById('savedSchoolsSwitcherList');
+  if (!box) return;
+  registerCurrentSchoolInList();
+  const list = getSavedSchoolsList();
+  const activeCode = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase();
+
+  box.innerHTML = list.map(s => {
+    const isAct = s.code === activeCode;
+    return `<button onclick="switchActiveSchoolCode('${s.code}')" class="px-2.5 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 transition ${isAct ? 'bg-indigo-600 text-white border-indigo-700 shadow' : 'bg-white text-slate-700 border-slate-300 hover:border-indigo-400'}">
+      <i class="fa-solid fa-school ${isAct ? 'text-amber-300' : 'text-indigo-600'}"></i>
+      <span>${s.name || s.code}</span>
+      <span class="font-mono text-[10px] opacity-80">(${s.code})</span>
+    </button>`;
+  }).join('');
+}
+
+async function switchActiveSchoolCode(targetCode, customSchoolName = '', customPin = null) {
+  const cleanTarget = String(targetCode || '').trim().toUpperCase().replace(/\s+/g, '-');
+  if (!cleanTarget) return;
+  const oldCode = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase();
+  const lvl = appData?.config?.schoolLevel || 'primary';
+
+  // 1. حفظ المدرسة الحالية في خزنتها المعزولة قبل الانتقال
+  registerCurrentSchoolInList();
+  if (typeof saveCurrentProfile === 'function') saveCurrentProfile(lvl);
+
+  // 2. تحديث رمز المدرسة النشط
+  const savedItem = getSavedSchoolsList().find(x => x.code === cleanTarget);
+  cloudConfig.schoolCode = cleanTarget;
+  if (customPin !== null) cloudConfig.secretPin = customPin;
+  else if (savedItem && savedItem.pin !== undefined) cloudConfig.secretPin = savedItem.pin;
+  saveCloudConfig();
+
+  // 3. تصفير الذاكرة المؤقتة وتحميل بيانات المدرسة الهدف فقط (منع تداخل أي طالب)
+  const localTarget = typeof getProfileData === 'function' ? getProfileData(lvl) : null;
+  if (localTarget && (!localTarget._tenantCode || localTarget._tenantCode === getFullSchoolCloudKey())) {
+    appData.config = { ...appData.config, ...(localTarget.config || {}) };
+    appData.rooms = localTarget.rooms || [];
+    appData.students = localTarget.students || [];
+    appData.grades = localTarget.grades || {};
+    appData.subjectDetails = localTarget.subjectDetails || {};
+  } else if (typeof createFreshProfile === 'function') {
+    const fresh = createFreshProfile(lvl, { schoolName: customSchoolName || savedItem?.name || '' });
+    appData.config = fresh.config;
+    appData.rooms = fresh.rooms;
+    appData.students = [];
+    appData.grades = {};
+    appData.subjectDetails = {};
+  }
+  appData._tenantCode = getFullSchoolCloudKey();
+
+  if (typeof saveCurrentProfile === 'function') saveCurrentProfile(lvl);
+  if (typeof syncConfigUI === 'function') syncConfigUI();
+  if (typeof renderAll === 'function') renderAll();
+
+  const codeInput = document.getElementById('cloudInputSchoolCode');
+  if (codeInput) codeInput.value = cleanTarget;
+  const pinInput = document.getElementById('cloudInputPin');
+  if (pinInput) pinInput.value = cloudConfig.secretPin || '';
+
+  renderSavedSchoolsSwitcher();
+  await pullFromCloud(false);
+}
+
+async function createNewIsolatedSchoolPrompt() {
+  const schoolName = prompt('🏫 أدخل اسم المدرسة الجديدة (مثال: مدرسة النور للبنات):');
+  if (!schoolName || !schoolName.trim()) return;
+  const rnd = Math.floor(1000 + Math.random() * 9000);
+  const suggestedCode = `SCH-${rnd}`;
+  const schoolCode = prompt(`🔑 أدخل رمز السحابة الخاص بـ (${schoolName.trim()})\n(هذا الرمز يعزل بيانات هذه المدرسة 100% عن باقي المدارس):`, suggestedCode);
+  if (!schoolCode || !schoolCode.trim()) return;
+  const pin = prompt('🔒 اختياري: أدخل الرمز السري (PIN) لحماية سحابة هذه المدرسة (أو اتركه فارغاً):', '') || '';
+
+  await switchActiveSchoolCode(schoolCode.trim().toUpperCase(), schoolName.trim(), pin.trim());
+  if (appData?.config) {
+    appData.config.schoolName = schoolName.trim();
+    if (typeof syncStudentsWithSchoolGenderPolicy === 'function') syncStudentsWithSchoolGenderPolicy(true);
+    if (typeof syncConfigUI === 'function') syncConfigUI();
+    if (typeof saveData === 'function') saveData();
+  }
+  if (typeof showToast === 'function') {
+    showToast(`🎉 تم إنشاء وعزل سجل (${schoolName.trim()}) بالكود (${schoolCode.trim().toUpperCase()}) بنجاح!`, 'success');
+  }
+}
+
 window.computeCloudPinHash = computeCloudPinHash;
 window.smartMergeCloudPayload = smartMergeCloudPayload;
 window.buildCloudSecurityMeta = buildCloudSecurityMeta;
@@ -3987,6 +4103,10 @@ window.copyTeacherInviteLink = copyTeacherInviteLink;
 window.applyCloudUrlParams = applyCloudUrlParams;
 window.loadCloudBackupsList = loadCloudBackupsList;
 window.restoreCloudBackupById = restoreCloudBackupById;
+window.registerCurrentSchoolInList = registerCurrentSchoolInList;
+window.renderSavedSchoolsSwitcher = renderSavedSchoolsSwitcher;
+window.switchActiveSchoolCode = switchActiveSchoolCode;
+window.createNewIsolatedSchoolPrompt = createNewIsolatedSchoolPrompt;
 
 
 /* --- Start of cloudSync.js --- */
@@ -4139,6 +4259,8 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
       }
     }
 
+    payloadToPush._tenantCode = fullKey;
+    appData._tenantCode = fullKey;
     if (typeof buildCloudSecurityMeta === 'function') {
       payloadToPush._security = buildCloudSecurityMeta(remotePayload, pinHash, remoteUpdatedBy, remoteUpdatedAt);
     }
@@ -4330,6 +4452,7 @@ function openCloudSyncModal() {
   if (chk) chk.checked = !!cloudConfig.enabled;
   modal.classList.remove('hidden');
 
+  if (typeof renderSavedSchoolsSwitcher === 'function') renderSavedSchoolsSwitcher();
   if (typeof loadCloudBackupsList === 'function') loadCloudBackupsList();
 }
 
@@ -4338,23 +4461,33 @@ function closeCloudSyncModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-function saveCloudSettingsFromModal() {
+async function saveCloudSettingsFromModal() {
+  const oldCode = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase();
+  const newCode = (document.getElementById('cloudInputSchoolCode')?.value || 'MIZAN-2026').trim().toUpperCase().replace(/\s+/g, '-');
+  const newPin = (document.getElementById('cloudInputPin')?.value || '').trim();
+
   cloudConfig.supabaseUrl = (document.getElementById('cloudInputUrl')?.value || '').trim();
   cloudConfig.supabaseKey = (document.getElementById('cloudInputKey')?.value || '').trim();
-  cloudConfig.schoolCode = (document.getElementById('cloudInputSchoolCode')?.value || 'MIZAN-2026').trim().toUpperCase();
-  cloudConfig.secretPin = (document.getElementById('cloudInputPin')?.value || '').trim();
   cloudConfig.userName = (document.getElementById('cloudInputUserName')?.value || 'الكنترول').trim();
   cloudConfig.enabled = !!document.getElementById('cloudInputEnabled')?.checked;
 
-  saveCloudConfig();
-  if (cloudConfig.enabled) pullFromCloud(false);
-  else updateCloudUiBadge('offline');
+  if (newCode !== oldCode && typeof switchActiveSchoolCode === 'function') {
+    await switchActiveSchoolCode(newCode, '', newPin);
+  } else {
+    cloudConfig.schoolCode = newCode;
+    cloudConfig.secretPin = newPin;
+    saveCloudConfig();
+    if (typeof registerCurrentSchoolInList === 'function') registerCurrentSchoolInList();
+    if (cloudConfig.enabled) await pullFromCloud(false);
+    else updateCloudUiBadge('offline');
+  }
   closeCloudSyncModal();
 }
 
 function initCloudSyncEngine() {
   loadCloudConfig();
   if (typeof applyCloudUrlParams === 'function') applyCloudUrlParams();
+  appData._tenantCode = getFullSchoolCloudKey();
 
   window.addEventListener('online', () => {
     if (pendingOfflinePush) pushToCloud(false);
@@ -4371,6 +4504,7 @@ function initCloudSyncEngine() {
   }
 }
 
+window.getActiveSchoolCode = () => (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase().replace(/\s+/g, '-');
 window.loadCloudConfig = loadCloudConfig;
 window.pushToCloud = pushToCloud;
 window.pullFromCloud = pullFromCloud;

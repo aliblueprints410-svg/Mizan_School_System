@@ -835,13 +835,29 @@
           </div>
         </div>
 
+        <!-- إدارة وتبديل المدارس المستقلة بدون تداخل -->
+        <div class="p-3 rounded-xl bg-amber-50/60 border border-amber-200 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="font-black text-amber-950 flex items-center gap-1.5">
+                <i class="fa-solid fa-building-shield text-amber-600"></i> نظام عزل وتعدد المدارس المستقلة (100% عزل بيانات):
+              </div>
+              <p class="text-[10px] text-amber-800">لكل مدرسة رمز مستقل وخزنة بيانات مفصولة تماماً لا تتداخل مع أي مدرسة أخرى.</p>
+            </div>
+            <button onclick="createNewIsolatedSchoolPrompt()" class="shrink-0 py-1.5 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-sm transition flex items-center gap-1 text-[11px]">
+              <i class="fa-solid fa-plus"></i> مدرسة جديدة مستقلة
+            </button>
+          </div>
+          <div id="savedSchoolsSwitcherList" class="flex flex-wrap gap-1.5 pt-1"></div>
+        </div>
+
         <!-- زر مشاركة رابط الدخول السريع للأساتذة -->
         <div class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 flex flex-col sm:flex-row items-center justify-between gap-2">
           <div>
             <div class="font-black text-indigo-950 flex items-center gap-1.5">
               <i class="fa-solid fa-share-nodes text-indigo-600"></i> رابط الدخول السريع للأساتذة (أونلاين):
             </div>
-            <p class="text-[10px] text-indigo-700">ينسخ رابطاً جاهزاً يتضمن رمز المدرسة والمرحلة ليفتحه الأستاذ من هاتفه أو حاسوبه ويتصل فوراً.</p>
+            <p class="text-[10px] text-indigo-700">ينسخ رابطاً جاهزاً يتضمن رمز هذه المدرسة والمرحلة ليفتحه الأستاذ من هاتفه أو حاسوبه ويتصل فوراً.</p>
           </div>
           <button onclick="copyTeacherInviteLink()" class="shrink-0 py-2 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition flex items-center gap-1.5">
             <i class="fa-solid fa-link"></i> نسخ رابط المعلمين
