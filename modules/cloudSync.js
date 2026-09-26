@@ -4,8 +4,8 @@
 const CLOUD_CONFIG_KEY = 'MIZAN_CLOUD_SYNC_CONFIG_2026';
 
 let cloudConfig = {
-  supabaseUrl: 'https://imnqwelbgxxnegapowpu.supabase.co',
-  supabaseKey: 'sb_publishable_Pf2C0cVb5IsXAWvFBYOrSQ_D09k-Ho_',
+  supabaseUrl: 'https://rrlesmhpaanbpbcpdmre.supabase.co',
+  supabaseKey: 'sb_publishable_gEAknXzFn1VWqD5jYwduAA_9w9ePzdU',
   schoolCode: 'MIZAN-2026',
   userName: 'إدارة المدرسة / الكنترول',
   autoSync: true,
@@ -23,6 +23,10 @@ function loadCloudConfig() {
     const raw = localStorage.getItem(CLOUD_CONFIG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
+      if (parsed.supabaseUrl && parsed.supabaseUrl.includes('imnqwelbgxxnegapowpu')) {
+        delete parsed.supabaseUrl;
+        delete parsed.supabaseKey;
+      }
       cloudConfig = { ...cloudConfig, ...parsed };
     }
   } catch (e) {
