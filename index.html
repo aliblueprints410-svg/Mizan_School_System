@@ -33,14 +33,14 @@
         <p class="text-[11px] text-indigo-200 mt-0.5">عزل تام لبيانات كل مدرسة ومزامنة فورية لحسابات الأساتذة</p>
       </div>
 
-      <!-- تبويبات: تسجيل دخول / تسجيل جديد -->
+      <!-- تبويبات: تسجيل دخول الأساتذة / لوحة المطور الحصرية -->
       <div class="px-6 pt-4">
         <div class="flex bg-slate-950/80 p-1 rounded-xl border border-slate-800 gap-1">
           <button type="button" id="tabBtnAuthLogin" onclick="switchAuthGateTab('login')" class="flex-1 py-2 rounded-lg font-black text-xs bg-amber-400 text-slate-950 shadow transition">
-            <i class="fa-solid fa-right-to-bracket ml-1"></i> تسجيل الدخول
+            <i class="fa-solid fa-right-to-bracket ml-1"></i> تسجيل دخول الأساتذة
           </button>
           <button type="button" id="tabBtnAuthRegister" onclick="switchAuthGateTab('register')" class="flex-1 py-2 rounded-lg font-bold text-xs text-indigo-200 hover:text-white transition">
-            <i class="fa-solid fa-user-plus ml-1"></i> تسجيل أستاذ / مدرسة جديدة
+            <i class="fa-solid fa-crown text-amber-400 ml-1"></i> لوحة المطور (إضافة مدرسة/أستاذ)
           </button>
         </div>
       </div>
@@ -49,13 +49,39 @@
       <form onsubmit="handleAuthGateSubmit(event)" class="p-6 space-y-3.5 text-xs">
         <div id="authGateErrorBox" class="hidden"></div>
 
+        <!-- حقل خاص بالمطور فقط يظهر في تبويب لوحة المطور -->
+        <div id="authRegisterExtraFields" class="hidden space-y-3 p-3 rounded-2xl bg-amber-500/10 border border-amber-400/40">
+          <div class="text-[11px] font-black text-amber-300 flex items-center justify-between border-b border-amber-400/20 pb-1.5">
+            <span><i class="fa-solid fa-shield-halved ml-1"></i> صلاحية المطور الحصرية (إدارة التراخيص)</span>
+            <span class="bg-amber-400 text-slate-950 px-2 py-0.5 rounded text-[10px]">للمطور فقط</span>
+          </div>
+          <div>
+            <label class="block font-bold text-amber-300 mb-1">
+              <i class="fa-solid fa-user-secret ml-1"></i> الرمز السري للمطور (Developer Master Key):
+            </label>
+            <input type="password" id="authInputDevMasterKey" placeholder="أدخل رمز المطور السري لإضافة مدرسة أو إيميل..." dir="ltr" class="w-full bg-slate-950 border-2 border-amber-400/60 focus:border-amber-300 rounded-xl px-3.5 py-2 font-mono text-amber-200 text-center outline-none">
+          </div>
+          <div>
+            <label class="block font-bold text-indigo-200 mb-1">
+              <i class="fa-solid fa-user-tie text-amber-400 ml-1"></i> اسم الأستاذ والصفة:
+            </label>
+            <input type="text" id="authInputTeacherName" placeholder="مثال: أستاذ علي - مدير المدرسة / معلم المادة" class="w-full bg-slate-950/90 border border-slate-700 focus:border-indigo-400 rounded-xl px-3.5 py-2 text-white outline-none">
+          </div>
+          <div>
+            <label class="block font-bold text-indigo-200 mb-1">
+              <i class="fa-solid fa-building-columns text-amber-400 ml-1"></i> اسم المدرسة الرسمي (عند تأسيس كود جديد):
+            </label>
+            <input type="text" id="authInputNewSchoolName" placeholder="مثال: مدرسة أمزا للبنين" class="w-full bg-slate-950/90 border border-slate-700 focus:border-indigo-400 rounded-xl px-3.5 py-2 text-white outline-none">
+          </div>
+        </div>
+
         <!-- 1. كود المدرسة -->
         <div>
           <label class="block font-bold text-amber-300 mb-1.5 flex items-center justify-between">
-            <span><i class="fa-solid fa-school ml-1"></i> كود المدرسة (School Code):</span>
+            <span><i class="fa-solid fa-school ml-1"></i> كود المدرسة المعتمد (School Code):</span>
             <span class="text-[10px] text-indigo-300 font-normal">يعزل بيانات مدرستك 100%</span>
           </label>
-          <input type="text" id="authInputSchoolCode" required placeholder="مثال: AMZA-2026 أو NOOR-2026" dir="ltr" class="w-full bg-slate-950/90 border-2 border-indigo-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-center font-mono font-black text-sm text-amber-300 tracking-wider uppercase outline-none transition">
+          <input type="text" id="authInputSchoolCode" required placeholder="مثال: SCH-1 أو AMZA-2026" dir="ltr" class="w-full bg-slate-950/90 border-2 border-indigo-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-center font-mono font-black text-sm text-amber-300 tracking-wider uppercase outline-none transition">
         </div>
 
         <!-- 2. إيميل الأستاذ -->
@@ -69,7 +95,7 @@
         <!-- 3. كلمة المرور -->
         <div>
           <label class="block font-bold text-indigo-100 mb-1.5">
-            <i class="fa-solid fa-key text-emerald-400 ml-1"></i> كلمة المرور (Password):
+            <i class="fa-solid fa-key text-emerald-400 ml-1"></i> كلمة المرور للأستاذ (Password):
           </label>
           <div class="relative">
             <input type="password" id="authInputPassword" required placeholder="••••••••" dir="ltr" class="w-full bg-slate-950/90 border border-slate-700 focus:border-emerald-400 rounded-xl pl-10 pr-3.5 py-2.5 font-mono text-white text-left outline-none transition">
@@ -79,35 +105,19 @@
           </div>
         </div>
 
-        <!-- حقول إضافية عند التسجيل الجديد -->
-        <div id="authRegisterExtraFields" class="hidden space-y-3 pt-1 border-t border-slate-800">
-          <div>
-            <label class="block font-bold text-indigo-200 mb-1">
-              <i class="fa-solid fa-user-tie text-amber-400 ml-1"></i> اسم الأستاذ والصفة (إلزامي للتسجيل في Supabase):
-            </label>
-            <input type="text" id="authInputTeacherName" placeholder="مثال: أستاذ علي - معلم الرياضيات" class="w-full bg-slate-950/90 border border-slate-700 focus:border-indigo-400 rounded-xl px-3.5 py-2 text-white outline-none">
-          </div>
-          <div>
-            <label class="block font-bold text-indigo-200 mb-1">
-              <i class="fa-solid fa-building-columns text-amber-400 ml-1"></i> اسم المدرسة الرسمي (عند تأسيس كود جديد):
-            </label>
-            <input type="text" id="authInputNewSchoolName" placeholder="مثال: مدرسة أمزا للبنين" class="w-full bg-slate-950/90 border border-slate-700 focus:border-indigo-400 rounded-xl px-3.5 py-2 text-white outline-none">
-          </div>
-        </div>
-
         <div class="flex items-center justify-between pt-1">
           <label class="flex items-center gap-2 cursor-pointer text-indigo-200 select-none">
             <input type="checkbox" id="authInputRemember" checked class="w-4 h-4 accent-amber-400 rounded">
             <span>تذكر دخولي على هذا الجهاز</span>
           </label>
           <span class="text-[10px] text-emerald-400 flex items-center gap-1">
-            <i class="fa-solid fa-lock"></i> موثق في Supabase
+            <i class="fa-solid fa-lock"></i> محمي وموثق في Supabase
           </span>
         </div>
 
         <button type="submit" id="authSubmitBtn" class="w-full py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm">
           <i class="fa-solid fa-unlock-keyhole"></i>
-          <span id="authSubmitBtnText">تسجيل الدخول (للحسابات المسجلة فقط)</span>
+          <span id="authSubmitBtnText">تسجيل الدخول (للحسابات المعتمدة فقط)</span>
         </button>
       </form>
 
@@ -933,9 +943,9 @@
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label class="block font-bold text-slate-700 mb-1">رمز المدرسة المشترك (Code):</label>
-            <input type="text" id="cloudInputSchoolCode" placeholder="مثال: AMZA-2026" class="w-full border-2 border-indigo-200 rounded-xl p-2 font-mono font-bold text-indigo-950 bg-indigo-50/40 focus:border-indigo-600 outline-none">
-            <span class="text-[10px] text-slate-500">مُعرّف سجل المدرسة في السحابة.</span>
+            <label class="block font-bold text-slate-700 mb-1">رمز المدرسة المعتمد (Code):</label>
+            <input type="text" id="cloudInputSchoolCode" readonly title="كود المدرسة مرتبط بحساب تسجيل الدخول المعتمد ولا يمكن تغييره يدوياً" class="w-full border-2 border-indigo-200 rounded-xl p-2 font-mono font-bold text-indigo-950 bg-slate-100 cursor-not-allowed outline-none">
+            <span class="text-[10px] text-slate-500">مرتبط بجلسة الدخول الموثقة.</span>
           </div>
           <div>
             <label class="block font-bold text-amber-800 mb-1"><i class="fa-solid fa-shield-halved text-amber-600"></i> الرمز السري للسحابة (PIN):</label>
@@ -944,8 +954,8 @@
           </div>
           <div>
             <label class="block font-bold text-slate-700 mb-1">اسم المستخدم / الصفة الحالية:</label>
-            <input type="text" id="cloudInputUserName" placeholder="مثال: أستاذ علي / الكنترول" class="w-full border border-slate-300 rounded-xl p-2 font-bold text-slate-800 focus:border-indigo-600 outline-none">
-            <span class="text-[10px] text-slate-500">يظهر في سجل التحديثات السحابية.</span>
+            <input type="text" id="cloudInputUserName" readonly class="w-full border border-slate-300 rounded-xl p-2 font-bold text-slate-800 bg-slate-100 cursor-not-allowed outline-none">
+            <span class="text-[10px] text-slate-500">حساب الأستاذ المسجل حالياً.</span>
           </div>
         </div>
 
@@ -954,15 +964,14 @@
           <div class="flex items-center justify-between gap-2">
             <div>
               <div class="font-black text-amber-950 flex items-center gap-1.5">
-                <i class="fa-solid fa-building-shield text-amber-600"></i> نظام عزل وتعدد المدارس المستقلة (100% عزل بيانات):
+                <i class="fa-solid fa-building-shield text-amber-600"></i> نظام عزل المدارس وتراخيص الحسابات (100% عزل بيانات):
               </div>
-              <p class="text-[10px] text-amber-800">لكل مدرسة رمز مستقل وخزنة بيانات مفصولة تماماً لا تتداخل مع أي مدرسة أخرى.</p>
+              <p class="text-[10px] text-amber-800">الدخول محصور فقط بالمدارس والإيميلات التي يضيفها مطور المنظومة في Supabase.</p>
             </div>
-            <button onclick="createNewIsolatedSchoolPrompt()" class="shrink-0 py-1.5 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-sm transition flex items-center gap-1 text-[11px]">
-              <i class="fa-solid fa-plus"></i> مدرسة جديدة مستقلة
+            <button onclick="closeCloudSyncModal(); logoutFromMizan();" class="shrink-0 py-1.5 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-sm transition flex items-center gap-1 text-[11px]">
+              <i class="fa-solid fa-right-left"></i> تبديل الحساب / المدرسة
             </button>
           </div>
-          <div id="savedSchoolsSwitcherList" class="flex flex-wrap gap-1.5 pt-1"></div>
         </div>
 
         <!-- زر مشاركة رابط الدخول السريع للأساتذة -->

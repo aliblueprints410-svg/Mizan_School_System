@@ -4576,6 +4576,13 @@ function clearActiveAuthSession() {
   } catch (e) {}
 }
 
+// بصمات التشفير المعتمدة حصرياً لمطور المنظومة (علي) لإضافة المدارس والإيميلات
+const DEV_MASTER_KEY_HASHES = [
+  '972966b261197a4245df352147e66ff262e8034c1fb91dd78b2b134032154e38',
+  '958f6763b3bca8bebc277a68d4319c9570547b24b81591a913000b019268d50f',
+  '5c374113d47786e443042fba732b3e8a40cab31e131c6754bf09177169ace350'
+];
+
 function switchAuthGateTab(mode) {
   currentAuthMode = mode === 'register' ? 'register' : 'login';
   const btnLogin = document.getElementById('tabBtnAuthLogin');
@@ -4587,12 +4594,12 @@ function switchAuthGateTab(mode) {
     if (btnReg) btnReg.className = 'flex-1 py-2 rounded-lg font-black text-xs bg-amber-400 text-slate-950 shadow transition';
     if (btnLogin) btnLogin.className = 'flex-1 py-2 rounded-lg font-bold text-xs text-indigo-200 hover:text-white transition';
     if (regExtra) regExtra.classList.remove('hidden');
-    if (submitTxt) submitTxt.innerText = 'تسجيل الحساب في Supabase والدخول للمدرسة';
+    if (submitTxt) submitTxt.innerText = '➕ اعتماد وحفظ المدرسة / الأستاذ في Supabase';
   } else {
     if (btnLogin) btnLogin.className = 'flex-1 py-2 rounded-lg font-black text-xs bg-amber-400 text-slate-950 shadow transition';
     if (btnReg) btnReg.className = 'flex-1 py-2 rounded-lg font-bold text-xs text-indigo-200 hover:text-white transition';
     if (regExtra) regExtra.classList.add('hidden');
-    if (submitTxt) submitTxt.innerText = 'تسجيل الدخول (للحسابات المسجلة فقط)';
+    if (submitTxt) submitTxt.innerText = 'تسجيل الدخول (للحسابات المعتمدة فقط)';
   }
   setAuthErrorMsg('');
 }
@@ -4629,7 +4636,7 @@ async function fetchSchoolRecordFromSupabase(schoolCodeRaw) {
   const lvl = appData?.config?.schoolLevel || 'primary';
   const fullKey = `${schoolCodeRaw}_${lvl}`;
   const baseUrl = (cloudConfig.supabaseUrl || '').replace(/\/$/, '');
-  const checkUrl = `${baseUrl}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(schoolCodeRaw + '_*')}&order=updated_at.desc&select=school_code,payload,school_name,school_level,updated_at,updated_by&limit=10`;
+  const checkUrl = `${baseUrl}/rest/v1/mizan_cloud_sync?or=(school_code.ilike.${encodeURIComponent(schoolCodeRaw)},school_code.ilike.${encodeURIComponent(schoolCodeRaw + '_*')})&order=updated_at.desc&select=school_code,payload,school_name,school_level,updated_at,updated_by&limit=10`;
   const res = await fetch(checkUrl, { headers: { 'apikey': cloudConfig.supabaseKey } });
   if (!res.ok) throw new Error('SUPABASE_FETCH_ERROR');
   const rawRows = await res.json();
@@ -4644,6 +4651,16 @@ async function fetchSchoolRecordFromSupabase(schoolCodeRaw) {
   [...rows].reverse().forEach(r => {
     const uMap = r?.payload?._security?.users || {};
     Object.assign(mergedUsers, uMap);
+    // دعم قراءة الإيميلات المضافة يدوياً مباشرة من جدول Supabase داخل _registered_teachers
+    const arr = r?.payload?._registered_teachers;
+    if (Array.isArray(arr)) {
+      arr.forEach(item => {
+        if (item && item.email) {
+          const em = String(item.email).trim().toLowerCase();
+          mergedUsers[em] = { ...(mergedUsers[em] || {}), ...item, email: em };
+        }
+      });
+    }
   });
   const exactRow = rows.find(r => r.school_code.toUpperCase().startsWith(fullKey.toUpperCase())) || rows[0];
   return { remoteRow: exactRow, mergedUsers };
@@ -4655,6 +4672,7 @@ async function handleAuthGateSubmit(event) {
   const schoolCodeRaw = (document.getElementById('authInputSchoolCode')?.value || '').trim().toUpperCase().replace(/\s+/g, '-');
   const emailRaw = (document.getElementById('authInputEmail')?.value || '').trim().toLowerCase();
   const passwordRaw = (document.getElementById('authInputPassword')?.value || '').trim();
+  const devMasterKeyRaw = (document.getElementById('authInputDevMasterKey')?.value || '').trim();
   const teacherNameRaw = (document.getElementById('authInputTeacherName')?.value || '').trim();
   const newSchoolNameRaw = (document.getElementById('authInputNewSchoolName')?.value || '').trim();
   const rememberMe = !!document.getElementById('authInputRemember')?.checked;
@@ -4679,7 +4697,7 @@ async function handleAuthGateSubmit(event) {
 
   const btn = document.getElementById('authSubmitBtn');
   if (btn) btn.disabled = true;
-  setAuthErrorMsg('🔄 جاري فحص قاعدة بيانات Supabase للتحقق من كود المدرسة وحساب الأستاذ...', true);
+  setAuthErrorMsg('🔄 جاري فحص قاعدة بيانات Supabase للتحقق من التراخيص...', true);
 
   try {
     const passHash = typeof computeCloudPinHash === 'function'
@@ -4690,44 +4708,54 @@ async function handleAuthGateSubmit(event) {
     const usersMap = { ...mergedUsers };
     const existingUser = usersMap[emailRaw];
 
-    // 1. وضع تسجيل الدخول الصارم (يقبل فقط الأكواد والإيميلات المسجلة فعلياً في Supabase)
+    // 1. وضع تسجيل دخول الأساتذة (يقبل فقط المدارس والإيميلات التي أضافها المطور في Supabase)
     if (currentAuthMode === 'login') {
       if (!remoteRow) {
-        setAuthErrorMsg(`❌ كود المدرسة (${schoolCodeRaw}) غير مسجل في قاعدة بيانات Supabase! يرجى التأكد من الكود أو إنشاء مدرسة جديدة من تبويب «تسجيل أستاذ / مدرسة جديدة».`);
+        setAuthErrorMsg(`❌ كود المدرسة (${schoolCodeRaw}) غير معتمد في قاعدة بيانات Supabase! يرجى التواصل مع مطور المنظومة (علي) لتفعيل كود المدرسة.`);
         if (btn) btn.disabled = false;
         return;
       }
       if (!existingUser) {
-        setAuthErrorMsg(`❌ البريد الإلكتروني (${emailRaw}) غير مسجل ضمن أساتذة مدرسة (${remoteRow.school_name || schoolCodeRaw}) في Supabase! يرجى التسجيل أولاً من تبويب «تسجيل أستاذ / مدرسة جديدة».`);
+        setAuthErrorMsg(`❌ البريد الإلكتروني (${emailRaw}) غير مضاف ضمن أساتذة مدرسة (${remoteRow.school_name || schoolCodeRaw})! لا يمكن الدخول إلا بالإيميلات المعتمدة من المطور.`);
         if (btn) btn.disabled = false;
         return;
       }
-      if (existingUser.passHash !== passHash) {
+      const isHashMatch = existingUser.passHash && existingUser.passHash === passHash;
+      const isPlainMatch = existingUser.password && String(existingUser.password).trim() === passwordRaw;
+      if (!isHashMatch && !isPlainMatch) {
         setAuthErrorMsg(`❌ كلمة المرور غير صحيحة لحساب الأستاذ (${emailRaw})!`);
         if (btn) btn.disabled = false;
         return;
       }
     } else {
-      // 2. وضع التسجيل الجديد الصريح في Supabase (register)
-      if (existingUser) {
-        setAuthErrorMsg(`⚠️ البريد الإلكتروني (${emailRaw}) مسجل مسبقاً في هذه المدرسة! يرجى الانتقال إلى تبويب «تسجيل الدخول».`);
+      // 2. وضع لوحة المطور الحصرية (لا يعمل إلا بالرمز السري الخاص بالمطور علي)
+      if (!devMasterKeyRaw) {
+        setAuthErrorMsg('⛔ إضافة المدارس وإيميلات الأساتذة محصورة بمطور المنظومة فقط! يرجى إدخال الرمز السري للمطور.');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      const devHash = typeof computeCloudPinHash === 'function'
+        ? await computeCloudPinHash(devMasterKeyRaw, 'MIZAN_DEV_MASTER')
+        : '';
+      if (!DEV_MASTER_KEY_HASHES.includes(devHash)) {
+        setAuthErrorMsg('⛔ الرمز السري للمطور غير صحيح! لا يُسمح لأي شخص غير مطور المنظومة بإضافة مدارس أو إيميلات.');
         if (btn) btn.disabled = false;
         return;
       }
       if (!teacherNameRaw) {
-        setAuthErrorMsg('⚠️ يرجى كتابة «اسم الأستاذ والصفة» لتسجيل الحساب في قاعدة بيانات Supabase.');
+        setAuthErrorMsg('⚠️ يرجى كتابة «اسم الأستاذ والصفة» لاعتماد الحساب في قاعدة بيانات Supabase.');
         if (btn) btn.disabled = false;
         return;
       }
       if (!remoteRow && !newSchoolNameRaw) {
-        setAuthErrorMsg(`⚠️ كود المدرسة (${schoolCodeRaw}) جديد؛ يرجى كتابة «اسم المدرسة الرسمي» لتأسيسها في قاعدة بيانات Supabase.`);
+        setAuthErrorMsg(`⚠️ كود المدرسة (${schoolCodeRaw}) جديد؛ يرجى كتابة «اسم المدرسة الرسمي» لتأسيسها في Supabase.`);
         if (btn) btn.disabled = false;
         return;
       }
     }
 
     const nowIso = new Date().toISOString();
-    const displayTeacherName = existingUser?.name || teacherNameRaw || emailRaw.split('@')[0];
+    const displayTeacherName = teacherNameRaw || existingUser?.name || emailRaw.split('@')[0];
     const userRole = existingUser?.role || (Object.keys(usersMap).length === 0 ? 'مدير المدرسة / الكنترول' : 'معلم المادة');
 
     usersMap[emailRaw] = {
@@ -4761,13 +4789,15 @@ async function handleAuthGateSubmit(event) {
     appData._security.users = usersMap;
     window._activeSchoolUsersMap = usersMap;
 
-    // حفظ وتوثيق الحساب في جدول Supabase قبل السماح بالدخول
-    setAuthErrorMsg('☁️ جاري توثيق وحفظ بيانات الحساب في جدول Supabase...', true);
-    const pushOk = typeof pushToCloud === 'function' ? await pushToCloud(true) : false;
-    if (!pushOk) {
-      setAuthErrorMsg('❌ تعذر حفظ أو توثيق الحساب في قاعدة بيانات Supabase! تأكد من الاتصال بالإنترنت.');
-      if (btn) btn.disabled = false;
-      return;
+    // عند إضافة مدرسة أو أستاذ من لوحة المطور: نحفظ فوراً في Supabase
+    if (currentAuthMode === 'register') {
+      setAuthErrorMsg('☁️ جاري اعتماد وحفظ المدرسة وحساب الأستاذ في جدول Supabase...', true);
+      const pushOk = typeof pushToCloud === 'function' ? await pushToCloud(true) : false;
+      if (!pushOk) {
+        setAuthErrorMsg('❌ تعذر حفظ الحساب في قاعدة بيانات Supabase! تأكد من الاتصال بالإنترنت.');
+        if (btn) btn.disabled = false;
+        return;
+      }
     }
 
     const sessionObj = {
@@ -4784,7 +4814,7 @@ async function handleAuthGateSubmit(event) {
 
     if (typeof showToast === 'function') {
       const msg = currentAuthMode === 'register'
-        ? `✅ تم تسجيل حساب (${displayTeacherName}) في Supabase لمدرسة (${appData.config?.schoolName || schoolCodeRaw})`
+        ? `👑 تم اعتماد وحفظ إيميل (${emailRaw}) في كود المدرسة (${schoolCodeRaw}) داخل Supabase بنجاح!`
         : `👋 مرحباً بك (${displayTeacherName}) في سجل مدرسة (${appData.config?.schoolName || schoolCodeRaw})`;
       showToast(msg, 'success');
     }
