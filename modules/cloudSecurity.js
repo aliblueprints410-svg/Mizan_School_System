@@ -186,6 +186,7 @@ function buildCloudSecurityMeta(remotePayload, pinHash, updatedBy, remoteUpdated
   return {
     pinHash: pinHash || prevSec.pinHash || '',
     version: (Number(prevSec.version) || 0) + 1,
+    users: { ...(prevSec.users || {}), ...(window._activeSchoolUsersMap || {}) },
     backups: backups.slice(0, 6)
   };
 }

@@ -40,7 +40,8 @@ const moduleOrder = [
   'analytics.js',
   'excelExport.js',
   'cloudSecurity.js',
-  'cloudSync.js'
+  'cloudSync.js',
+  'authGate.js'
 ];
 
 let bundleContent = '/* حزمة النظام الموزعة آلياً - يُمنع التعديل اليدوي المباشر هنا */\n\n';

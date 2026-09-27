@@ -62,6 +62,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (typeof loadData === 'function') loadData();
   if (typeof applyLockUiState === 'function') applyLockUiState();
   if (typeof updateUndoButtonState === 'function') updateUndoButtonState();
+  if (typeof initAuthGateOnBoot === 'function') initAuthGateOnBoot();
   if (typeof initCloudSyncEngine === 'function') initCloudSyncEngine();
 });
 

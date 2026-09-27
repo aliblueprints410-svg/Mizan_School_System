@@ -17,6 +17,111 @@
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
 
+  <!-- بوابة تسجيل الدخول الموحدة للمدرسة والأساتذة (تظهر في بداية تشغيل المنظومة) -->
+  <div id="authGateOverlay" class="fixed inset-0 z-[100] bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 flex items-center justify-center p-4 overflow-y-auto no-print">
+    <div class="w-full max-w-md bg-slate-900/90 backdrop-blur-xl border border-indigo-500/30 rounded-3xl shadow-2xl overflow-hidden text-white">
+      <!-- رأس نافذة الدخول -->
+      <div class="bg-gradient-to-r from-indigo-900 via-indigo-950 to-slate-900 p-6 text-center border-b border-indigo-500/20 relative">
+        <div class="w-20 h-20 mx-auto mb-3 rounded-2xl overflow-hidden border-2 border-amber-400 shadow-xl bg-slate-950 flex items-center justify-center">
+          <img src="icon.png" alt="شعار منظومة ميزان" class="w-full h-full object-cover">
+        </div>
+        <div class="inline-flex items-center gap-2 mb-1">
+          <span class="bg-amber-400 text-slate-950 font-black text-xs px-2.5 py-0.5 rounded-full shadow">منظومة ميزان</span>
+          <span class="bg-indigo-950 text-amber-300 font-mono font-bold text-xs px-2 py-0.5 rounded-full border border-amber-400/30">v 1.0.6</span>
+        </div>
+        <h2 class="text-lg font-black text-white mt-1">بوابة الدخول المدرسية الموحدة</h2>
+        <p class="text-[11px] text-indigo-200 mt-0.5">عزل تام لبيانات كل مدرسة ومزامنة فورية لحسابات الأساتذة</p>
+      </div>
+
+      <!-- تبويبات: تسجيل دخول / تسجيل جديد -->
+      <div class="px-6 pt-4">
+        <div class="flex bg-slate-950/80 p-1 rounded-xl border border-slate-800 gap-1">
+          <button type="button" id="tabBtnAuthLogin" onclick="switchAuthGateTab('login')" class="flex-1 py-2 rounded-lg font-black text-xs bg-amber-400 text-slate-950 shadow transition">
+            <i class="fa-solid fa-right-to-bracket ml-1"></i> تسجيل الدخول
+          </button>
+          <button type="button" id="tabBtnAuthRegister" onclick="switchAuthGateTab('register')" class="flex-1 py-2 rounded-lg font-bold text-xs text-indigo-200 hover:text-white transition">
+            <i class="fa-solid fa-user-plus ml-1"></i> تسجيل أستاذ / مدرسة جديدة
+          </button>
+        </div>
+      </div>
+
+      <!-- نموذج الإدخال -->
+      <form onsubmit="handleAuthGateSubmit(event)" class="p-6 space-y-3.5 text-xs">
+        <div id="authGateErrorBox" class="hidden"></div>
+
+        <!-- 1. كود المدرسة -->
+        <div>
+          <label class="block font-bold text-amber-300 mb-1.5 flex items-center justify-between">
+            <span><i class="fa-solid fa-school ml-1"></i> كود المدرسة (School Code):</span>
+            <span class="text-[10px] text-indigo-300 font-normal">يعزل بيانات مدرستك 100%</span>
+          </label>
+          <input type="text" id="authInputSchoolCode" required placeholder="مثال: AMZA-2026 أو NOOR-2026" dir="ltr" class="w-full bg-slate-950/90 border-2 border-indigo-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-center font-mono font-black text-sm text-amber-300 tracking-wider uppercase outline-none transition">
+        </div>
+
+        <!-- 2. إيميل الأستاذ -->
+        <div>
+          <label class="block font-bold text-indigo-100 mb-1.5">
+            <i class="fa-solid fa-envelope text-sky-400 ml-1"></i> البريد الإلكتروني للأستاذ (Email):
+          </label>
+          <input type="email" id="authInputEmail" required placeholder="teacher@gmail.com" dir="ltr" class="w-full bg-slate-950/90 border border-slate-700 focus:border-sky-400 rounded-xl px-3.5 py-2.5 font-mono text-white text-left outline-none transition">
+        </div>
+
+        <!-- 3. كلمة المرور -->
+        <div>
+          <label class="block font-bold text-indigo-100 mb-1.5">
+            <i class="fa-solid fa-key text-emerald-400 ml-1"></i> كلمة المرور (Password):
+          </label>
+          <div class="relative">
+            <input type="password" id="authInputPassword" required placeholder="••••••••" dir="ltr" class="w-full bg-slate-950/90 border border-slate-700 focus:border-emerald-400 rounded-xl pl-10 pr-3.5 py-2.5 font-mono text-white text-left outline-none transition">
+            <button type="button" onclick="toggleAuthPasswordVisibility()" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
+              <i id="authPassEyeIcon" class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- حقول إضافية عند التسجيل الجديد -->
+        <div id="authRegisterExtraFields" class="hidden space-y-3 pt-1 border-t border-slate-800">
+          <div>
+            <label class="block font-bold text-indigo-200 mb-1">
+              <i class="fa-solid fa-user-tie text-amber-400 ml-1"></i> اسم الأستاذ والصفة (اختياري):
+            </label>
+            <input type="text" id="authInputTeacherName" placeholder="مثال: أستاذ علي - معلم الرياضيات" class="w-full bg-slate-950/90 border border-slate-700 focus:border-indigo-400 rounded-xl px-3.5 py-2 text-white outline-none">
+          </div>
+          <div>
+            <label class="block font-bold text-indigo-200 mb-1">
+              <i class="fa-solid fa-building-columns text-amber-400 ml-1"></i> اسم المدرسة الرسمي (عند تأسيس كود جديد):
+            </label>
+            <input type="text" id="authInputNewSchoolName" placeholder="مثال: مدرسة أمزا للبنين" class="w-full bg-slate-950/90 border border-slate-700 focus:border-indigo-400 rounded-xl px-3.5 py-2 text-white outline-none">
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-1">
+          <label class="flex items-center gap-2 cursor-pointer text-indigo-200 select-none">
+            <input type="checkbox" id="authInputRemember" checked class="w-4 h-4 accent-amber-400 rounded">
+            <span>تذكر دخولي على هذا الجهاز</span>
+          </label>
+          <span class="text-[10px] text-emerald-400 flex items-center gap-1">
+            <i class="fa-solid fa-lock"></i> مشفر بـ SHA-256
+          </span>
+        </div>
+
+        <button type="submit" id="authSubmitBtn" class="w-full py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm">
+          <i class="fa-solid fa-unlock-keyhole"></i>
+          <span id="authSubmitBtnText">تسجيل الدخول وربط سجل المدرسة</span>
+        </button>
+      </form>
+
+      <!-- تذييل نافذة الدخول بحقوق المطور -->
+      <div class="bg-slate-950 px-6 py-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+        <span>المطور: <strong class="text-white">علي</strong></span>
+        <div class="flex items-center gap-3 font-mono">
+          <a href="https://t.me/Ali_Muhammed_410" target="_blank" class="text-sky-400 hover:underline"><i class="fa-brands fa-telegram"></i> @Ali_Muhammed_410</a>
+          <span class="text-emerald-400"><i class="fa-brands fa-whatsapp"></i> eng.ali410</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- شريط العنوان العلوي والتنقل -->
   <header class="bg-indigo-900 text-white shadow-lg no-print sticky top-0 z-50">
     <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
@@ -34,6 +139,15 @@
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <!-- شارة الأستاذ المسجل حالياً وزر الخروج -->
+        <div id="headerAuthUserBadge" class="hidden flex items-center gap-1.5 bg-slate-950/80 border border-amber-400/40 px-2.5 py-1 rounded-lg text-xs">
+          <i class="fa-solid fa-user-shield text-amber-400"></i>
+          <span id="headerAuthTeacherEmail" class="font-bold text-white"></span>
+          <span id="headerAuthSchoolCode" class="font-mono text-[10px] bg-indigo-900 text-amber-300 px-1.5 py-0.5 rounded"></span>
+          <button onclick="logoutFromMizan()" class="mr-1 text-rose-400 hover:text-rose-300 font-bold flex items-center gap-1 border-r border-slate-700 pr-1.5" title="تسجيل الخروج وتبديل الحساب أو المدرسة">
+            <i class="fa-solid fa-power-off"></i> خروج
+          </button>
+        </div>
         <button id="btnCloudSyncHeader" onclick="openCloudSyncModal()" class="px-3 py-1.5 bg-indigo-950/90 hover:bg-indigo-800 border border-indigo-400/30 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow" title="المزامنة السحابية المركزية (Supabase Cloud Sync)">
           <i class="fa-solid fa-cloud text-emerald-400"></i> <span>السحابة</span>
         </button>
@@ -950,6 +1064,7 @@
   <script src="modules/excelExport.js"></script>
   <script src="modules/cloudSecurity.js"></script>
   <script src="modules/cloudSync.js"></script>
+  <script src="modules/authGate.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
