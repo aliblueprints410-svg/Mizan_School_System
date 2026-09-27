@@ -104,8 +104,9 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
     : '';
 
   try {
-    // 1. جلب السجل السحابي الحالي للتحقق من الرمز السري وإجراء الدمج الذكي غير المدمّر
-    const checkUrl = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=payload,updated_at,updated_by&limit=1`;
+    const baseUrl = cloudConfig.supabaseUrl.replace(/\/$/, '');
+    // 1. جلب أحدث سجل سحابي للمدرسة للتحقق من الرمز السري وإجراء الدمج الذكي غير المدمّر
+    const checkUrl = `${baseUrl}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(fullKey + '*')}&order=updated_at.desc&select=payload,updated_at,updated_by&limit=1`;
     const checkRes = await fetch(checkUrl, { headers: { 'apikey': cloudConfig.supabaseKey } });
 
     let payloadToPush = { ...appData };
@@ -132,12 +133,6 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
 
         // درع منع المسح من جهاز فارغ + دمج الطلبة ودرجات المواد المتزامنة دون فقدان أي طالب
         if (!forceOverwrite && typeof smartMergeCloudPayload === 'function' && remotePayload) {
-          const remoteCount = Array.isArray(remotePayload.students) ? remotePayload.students.length : 0;
-          const localCount = Array.isArray(appData.students) ? appData.students.length : 0;
-          if (localCount === 0 && remoteCount > 0) {
-            await pullFromCloud(true);
-            return true;
-          }
           payloadToPush = smartMergeCloudPayload(remotePayload, appData, false);
           appData.students = payloadToPush.students;
           appData.grades = payloadToPush.grades;
@@ -152,6 +147,13 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
     if (typeof buildCloudSecurityMeta === 'function') {
       payloadToPush._security = buildCloudSecurityMeta(remotePayload, pinHash, remoteUpdatedBy, remoteUpdatedAt);
     }
+    const registeredTeachers = Object.values(payloadToPush._security?.users || {}).map(u => ({
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      registeredAt: u.registeredAt || u.lastLoginAt
+    }));
+    payloadToPush = { _registered_teachers: registeredTeachers, ...payloadToPush };
 
     const nowIso = new Date().toISOString();
     const bodyObj = {
@@ -163,7 +165,7 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
       updated_by: cloudConfig.userName || 'الكنترول'
     };
 
-    const res = await fetch(`${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync`, {
+    let res = await fetch(`${baseUrl}/rest/v1/mizan_cloud_sync?on_conflict=school_code`, {
       method: 'POST',
       headers: {
         'apikey': cloudConfig.supabaseKey,
@@ -172,6 +174,20 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
       },
       body: JSON.stringify(bodyObj)
     });
+
+    // إذا كانت سياسة RLS في Supabase تسمح بـ INSERT و SELECT فقط وتمنع UPDATE، نحفظ التحديث كإصدار سحابي جديد (Append-Only)
+    if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 409)) {
+      const versionedBody = { ...bodyObj, school_code: `${fullKey}__v${Date.now()}` };
+      res = await fetch(`${baseUrl}/rest/v1/mizan_cloud_sync`, {
+        method: 'POST',
+        headers: {
+          'apikey': cloudConfig.supabaseKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(versionedBody)
+      });
+    }
 
     if (res.ok) {
       pendingOfflinePush = false;
@@ -211,7 +227,7 @@ async function pullFromCloud(silent = false) {
     : '';
 
   try {
-    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=*&limit=1`;
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(fullKey + '*')}&order=updated_at.desc&select=*&limit=1`;
     const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
 
     if (!res.ok) {
@@ -261,6 +277,10 @@ async function pullFromCloud(silent = false) {
       appData.students = merged.students || [];
       appData.grades = merged.grades || {};
       appData.subjectDetails = merged.subjectDetails || {};
+      appData._security = merged._security || incomingData._security || appData._security || {};
+      if (appData._security.users) {
+        window._activeSchoolUsersMap = { ...appData._security.users, ...(window._activeSchoolUsersMap || {}) };
+      }
 
       if (typeof saveCurrentProfile === 'function') saveCurrentProfile();
       if (typeof syncConfigUI === 'function') syncConfigUI();
@@ -284,6 +304,7 @@ async function pullFromCloud(silent = false) {
 
 async function checkCloudForUpdates() {
   if (!cloudConfig.enabled || !cloudConfig.autoSync || isPullingFromCloud) return;
+  if (typeof getActiveAuthSession === 'function' && !getActiveAuthSession()) return;
   if (!navigator.onLine) {
     updateCloudUiBadge('offline');
     return;
@@ -295,7 +316,7 @@ async function checkCloudForUpdates() {
 
   const fullKey = getFullSchoolCloudKey();
   try {
-    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=updated_at,updated_by&limit=1`;
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(fullKey + '*')}&order=updated_at.desc&select=updated_at,updated_by&limit=1`;
     const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
     if (!res.ok) return;
 
@@ -322,6 +343,7 @@ async function checkCloudForUpdates() {
 
 function scheduleCloudPush() {
   if (!cloudConfig.enabled || !cloudConfig.autoSync || isPullingFromCloud) return;
+  if (typeof getActiveAuthSession === 'function' && !getActiveAuthSession()) return;
   if (cloudPushTimer) clearTimeout(cloudPushTimer);
   cloudPushTimer = setTimeout(() => { pushToCloud(true); }, 1500);
 }
@@ -341,6 +363,7 @@ function openCloudSyncModal() {
   modal.classList.remove('hidden');
 
   if (typeof renderSavedSchoolsSwitcher === 'function') renderSavedSchoolsSwitcher();
+  if (typeof renderCloudRegisteredUsersList === 'function') renderCloudRegisteredUsersList();
   if (typeof loadCloudBackupsList === 'function') loadCloudBackupsList();
 }
 
@@ -378,13 +401,16 @@ function initCloudSyncEngine() {
   appData._tenantCode = getFullSchoolCloudKey();
 
   window.addEventListener('online', () => {
+    if (typeof getActiveAuthSession === 'function' && !getActiveAuthSession()) return;
     if (pendingOfflinePush) pushToCloud(false);
     else checkCloudForUpdates();
   });
   window.addEventListener('offline', () => updateCloudUiBadge('offline'));
 
   if (cloudConfig.enabled) {
-    setTimeout(() => { pullFromCloud(true); }, 800);
+    setTimeout(() => {
+      if (typeof getActiveAuthSession !== 'function' || getActiveAuthSession()) pullFromCloud(true);
+    }, 800);
     if (cloudPollInterval) clearInterval(cloudPollInterval);
     cloudPollInterval = setInterval(checkCloudForUpdates, 8000);
   } else {

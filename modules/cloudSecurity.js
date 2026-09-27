@@ -247,7 +247,7 @@ async function loadCloudBackupsList() {
 
   const fullKey = getFullSchoolCloudKey();
   try {
-    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=payload&limit=1`;
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(fullKey + '*')}&order=updated_at.desc&select=payload&limit=1`;
     const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
     if (!res.ok) {
       container.innerHTML = '<div class="text-center py-2 text-amber-700 text-xs">تعذر قراءة سجل النسخ السحابية حالياً.</div>';

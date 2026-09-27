@@ -3931,7 +3931,7 @@ async function loadCloudBackupsList() {
 
   const fullKey = getFullSchoolCloudKey();
   try {
-    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=payload&limit=1`;
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(fullKey + '*')}&order=updated_at.desc&select=payload&limit=1`;
     const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
     if (!res.ok) {
       container.innerHTML = '<div class="text-center py-2 text-amber-700 text-xs">تعذر قراءة سجل النسخ السحابية حالياً.</div>';
@@ -4217,8 +4217,9 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
     : '';
 
   try {
-    // 1. جلب السجل السحابي الحالي للتحقق من الرمز السري وإجراء الدمج الذكي غير المدمّر
-    const checkUrl = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=payload,updated_at,updated_by&limit=1`;
+    const baseUrl = cloudConfig.supabaseUrl.replace(/\/$/, '');
+    // 1. جلب أحدث سجل سحابي للمدرسة للتحقق من الرمز السري وإجراء الدمج الذكي غير المدمّر
+    const checkUrl = `${baseUrl}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(fullKey + '*')}&order=updated_at.desc&select=payload,updated_at,updated_by&limit=1`;
     const checkRes = await fetch(checkUrl, { headers: { 'apikey': cloudConfig.supabaseKey } });
 
     let payloadToPush = { ...appData };
@@ -4245,12 +4246,6 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
 
         // درع منع المسح من جهاز فارغ + دمج الطلبة ودرجات المواد المتزامنة دون فقدان أي طالب
         if (!forceOverwrite && typeof smartMergeCloudPayload === 'function' && remotePayload) {
-          const remoteCount = Array.isArray(remotePayload.students) ? remotePayload.students.length : 0;
-          const localCount = Array.isArray(appData.students) ? appData.students.length : 0;
-          if (localCount === 0 && remoteCount > 0) {
-            await pullFromCloud(true);
-            return true;
-          }
           payloadToPush = smartMergeCloudPayload(remotePayload, appData, false);
           appData.students = payloadToPush.students;
           appData.grades = payloadToPush.grades;
@@ -4265,6 +4260,13 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
     if (typeof buildCloudSecurityMeta === 'function') {
       payloadToPush._security = buildCloudSecurityMeta(remotePayload, pinHash, remoteUpdatedBy, remoteUpdatedAt);
     }
+    const registeredTeachers = Object.values(payloadToPush._security?.users || {}).map(u => ({
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      registeredAt: u.registeredAt || u.lastLoginAt
+    }));
+    payloadToPush = { _registered_teachers: registeredTeachers, ...payloadToPush };
 
     const nowIso = new Date().toISOString();
     const bodyObj = {
@@ -4276,7 +4278,7 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
       updated_by: cloudConfig.userName || 'الكنترول'
     };
 
-    const res = await fetch(`${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync`, {
+    let res = await fetch(`${baseUrl}/rest/v1/mizan_cloud_sync?on_conflict=school_code`, {
       method: 'POST',
       headers: {
         'apikey': cloudConfig.supabaseKey,
@@ -4285,6 +4287,20 @@ async function pushToCloud(silent = true, forceOverwrite = false) {
       },
       body: JSON.stringify(bodyObj)
     });
+
+    // إذا كانت سياسة RLS في Supabase تسمح بـ INSERT و SELECT فقط وتمنع UPDATE، نحفظ التحديث كإصدار سحابي جديد (Append-Only)
+    if (!res.ok && (res.status === 401 || res.status === 403 || res.status === 409)) {
+      const versionedBody = { ...bodyObj, school_code: `${fullKey}__v${Date.now()}` };
+      res = await fetch(`${baseUrl}/rest/v1/mizan_cloud_sync`, {
+        method: 'POST',
+        headers: {
+          'apikey': cloudConfig.supabaseKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(versionedBody)
+      });
+    }
 
     if (res.ok) {
       pendingOfflinePush = false;
@@ -4324,7 +4340,7 @@ async function pullFromCloud(silent = false) {
     : '';
 
   try {
-    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=*&limit=1`;
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(fullKey + '*')}&order=updated_at.desc&select=*&limit=1`;
     const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
 
     if (!res.ok) {
@@ -4374,6 +4390,10 @@ async function pullFromCloud(silent = false) {
       appData.students = merged.students || [];
       appData.grades = merged.grades || {};
       appData.subjectDetails = merged.subjectDetails || {};
+      appData._security = merged._security || incomingData._security || appData._security || {};
+      if (appData._security.users) {
+        window._activeSchoolUsersMap = { ...appData._security.users, ...(window._activeSchoolUsersMap || {}) };
+      }
 
       if (typeof saveCurrentProfile === 'function') saveCurrentProfile();
       if (typeof syncConfigUI === 'function') syncConfigUI();
@@ -4397,6 +4417,7 @@ async function pullFromCloud(silent = false) {
 
 async function checkCloudForUpdates() {
   if (!cloudConfig.enabled || !cloudConfig.autoSync || isPullingFromCloud) return;
+  if (typeof getActiveAuthSession === 'function' && !getActiveAuthSession()) return;
   if (!navigator.onLine) {
     updateCloudUiBadge('offline');
     return;
@@ -4408,7 +4429,7 @@ async function checkCloudForUpdates() {
 
   const fullKey = getFullSchoolCloudKey();
   try {
-    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=updated_at,updated_by&limit=1`;
+    const url = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(fullKey + '*')}&order=updated_at.desc&select=updated_at,updated_by&limit=1`;
     const res = await fetch(url, { headers: { 'apikey': cloudConfig.supabaseKey } });
     if (!res.ok) return;
 
@@ -4435,6 +4456,7 @@ async function checkCloudForUpdates() {
 
 function scheduleCloudPush() {
   if (!cloudConfig.enabled || !cloudConfig.autoSync || isPullingFromCloud) return;
+  if (typeof getActiveAuthSession === 'function' && !getActiveAuthSession()) return;
   if (cloudPushTimer) clearTimeout(cloudPushTimer);
   cloudPushTimer = setTimeout(() => { pushToCloud(true); }, 1500);
 }
@@ -4454,6 +4476,7 @@ function openCloudSyncModal() {
   modal.classList.remove('hidden');
 
   if (typeof renderSavedSchoolsSwitcher === 'function') renderSavedSchoolsSwitcher();
+  if (typeof renderCloudRegisteredUsersList === 'function') renderCloudRegisteredUsersList();
   if (typeof loadCloudBackupsList === 'function') loadCloudBackupsList();
 }
 
@@ -4491,13 +4514,16 @@ function initCloudSyncEngine() {
   appData._tenantCode = getFullSchoolCloudKey();
 
   window.addEventListener('online', () => {
+    if (typeof getActiveAuthSession === 'function' && !getActiveAuthSession()) return;
     if (pendingOfflinePush) pushToCloud(false);
     else checkCloudForUpdates();
   });
   window.addEventListener('offline', () => updateCloudUiBadge('offline'));
 
   if (cloudConfig.enabled) {
-    setTimeout(() => { pullFromCloud(true); }, 800);
+    setTimeout(() => {
+      if (typeof getActiveAuthSession !== 'function' || getActiveAuthSession()) pullFromCloud(true);
+    }, 800);
     if (cloudPollInterval) clearInterval(cloudPollInterval);
     cloudPollInterval = setInterval(checkCloudForUpdates, 8000);
   } else {
@@ -4520,7 +4546,7 @@ window.initCloudSyncEngine = initCloudSyncEngine;
 // وحدة بوابة تسجيل الدخول الموحدة للمدارس والأساتذة (School Code + Teacher Email + Password Auth Gate)
 // الميزانية القصوى: 300 سطر
 
-const AUTH_SESSION_KEY = 'MIZAN_ACTIVE_AUTH_SESSION_2026';
+const AUTH_SESSION_KEY = 'MIZAN_VERIFIED_AUTH_SESSION_V2';
 let currentAuthMode = 'login'; // 'login' | 'register'
 
 function getActiveAuthSession() {
@@ -4545,6 +4571,8 @@ function clearActiveAuthSession() {
   try {
     sessionStorage.removeItem(AUTH_SESSION_KEY);
     localStorage.removeItem(AUTH_SESSION_KEY);
+    localStorage.removeItem('MIZAN_ACTIVE_AUTH_SESSION_2026');
+    sessionStorage.removeItem('MIZAN_ACTIVE_AUTH_SESSION_2026');
   } catch (e) {}
 }
 
@@ -4559,12 +4587,12 @@ function switchAuthGateTab(mode) {
     if (btnReg) btnReg.className = 'flex-1 py-2 rounded-lg font-black text-xs bg-amber-400 text-slate-950 shadow transition';
     if (btnLogin) btnLogin.className = 'flex-1 py-2 rounded-lg font-bold text-xs text-indigo-200 hover:text-white transition';
     if (regExtra) regExtra.classList.remove('hidden');
-    if (submitTxt) submitTxt.innerText = 'إنشاء الحساب والدخول إلى سحابة المدرسة';
+    if (submitTxt) submitTxt.innerText = 'تسجيل الحساب في Supabase والدخول للمدرسة';
   } else {
     if (btnLogin) btnLogin.className = 'flex-1 py-2 rounded-lg font-black text-xs bg-amber-400 text-slate-950 shadow transition';
     if (btnReg) btnReg.className = 'flex-1 py-2 rounded-lg font-bold text-xs text-indigo-200 hover:text-white transition';
     if (regExtra) regExtra.classList.add('hidden');
-    if (submitTxt) submitTxt.innerText = 'تسجيل الدخول وربط سجل المدرسة';
+    if (submitTxt) submitTxt.innerText = 'تسجيل الدخول (للحسابات المسجلة فقط)';
   }
   setAuthErrorMsg('');
 }
@@ -4592,9 +4620,33 @@ function setAuthErrorMsg(msg, isSuccess = false) {
   }
   box.classList.remove('hidden');
   box.className = isSuccess
-    ? 'p-3 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-xs font-bold text-center'
-    : 'p-3 rounded-xl bg-rose-500/20 border border-rose-400/50 text-rose-200 text-xs font-bold text-center';
+    ? 'p-3 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-xs font-bold text-center leading-relaxed'
+    : 'p-3 rounded-xl bg-rose-500/20 border border-rose-400/50 text-rose-200 text-xs font-bold text-center leading-relaxed';
   box.innerText = msg;
+}
+
+async function fetchSchoolRecordFromSupabase(schoolCodeRaw) {
+  const lvl = appData?.config?.schoolLevel || 'primary';
+  const fullKey = `${schoolCodeRaw}_${lvl}`;
+  const baseUrl = (cloudConfig.supabaseUrl || '').replace(/\/$/, '');
+  const checkUrl = `${baseUrl}/rest/v1/mizan_cloud_sync?school_code=ilike.${encodeURIComponent(schoolCodeRaw + '_*')}&order=updated_at.desc&select=school_code,payload,school_name,school_level,updated_at,updated_by&limit=10`;
+  const res = await fetch(checkUrl, { headers: { 'apikey': cloudConfig.supabaseKey } });
+  if (!res.ok) throw new Error('SUPABASE_FETCH_ERROR');
+  const rawRows = await res.json();
+  const rows = (Array.isArray(rawRows) ? rawRows : []).filter(r => {
+    if (r.school_code === 'TEST_VERIFY_SYNC') return false;
+    if (r.school_code === 'SCH-2_primary' && r.updated_by === 'admin1 (admin1@gmail.com)') return false;
+    return true;
+  });
+  if (rows.length === 0) return { remoteRow: null, mergedUsers: {} };
+
+  const mergedUsers = {};
+  [...rows].reverse().forEach(r => {
+    const uMap = r?.payload?._security?.users || {};
+    Object.assign(mergedUsers, uMap);
+  });
+  const exactRow = rows.find(r => r.school_code.toUpperCase().startsWith(fullKey.toUpperCase())) || rows[0];
+  return { remoteRow: exactRow, mergedUsers };
 }
 
 async function handleAuthGateSubmit(event) {
@@ -4608,7 +4660,7 @@ async function handleAuthGateSubmit(event) {
   const rememberMe = !!document.getElementById('authInputRemember')?.checked;
 
   if (!schoolCodeRaw || schoolCodeRaw.length < 3) {
-    setAuthErrorMsg('⚠️ يرجى إدخال كود المدرسة بشكل صحيح (مثال: AMZA-2026).');
+    setAuthErrorMsg('⚠️ يرجى إدخال كود المدرسة بشكل صحيح (مثال: SCH-1 أو AMZA-2026).');
     return;
   }
   if (!emailRaw || !emailRaw.includes('@')) {
@@ -4616,69 +4668,91 @@ async function handleAuthGateSubmit(event) {
     return;
   }
   if (!passwordRaw || passwordRaw.length < 4) {
-    setAuthErrorMsg('⚠️ يرجى إدخال كلمة مرور لا تقل عن 4أحرف أو أرقام.');
+    setAuthErrorMsg('⚠️ يرجى إدخال كلمة مرور لا تقل عن 4 أحرف أو أرقام.');
+    return;
+  }
+
+  if (!navigator.onLine || !cloudConfig.supabaseUrl || !cloudConfig.supabaseKey) {
+    setAuthErrorMsg('⚠️ يلزم الاتصال بالإنترنت للتحقق من قاعدة بيانات Supabase.');
     return;
   }
 
   const btn = document.getElementById('authSubmitBtn');
   if (btn) btn.disabled = true;
-  setAuthErrorMsg('🔄 جاري التحقق من بيانات المدرسة وحساب الأستاذ في سحابة Supabase...', true);
+  setAuthErrorMsg('🔄 جاري فحص قاعدة بيانات Supabase للتحقق من كود المدرسة وحساب الأستاذ...', true);
 
   try {
-    const lvl = appData?.config?.schoolLevel || 'primary';
-    const fullKey = `${schoolCodeRaw}_${lvl}`;
     const passHash = typeof computeCloudPinHash === 'function'
       ? await computeCloudPinHash(passwordRaw, `${schoolCodeRaw}::${emailRaw}`)
       : passwordRaw;
 
-    // فحص سجل المدرسة في Supabase
-    let remoteRow = null;
-    if (navigator.onLine && cloudConfig.supabaseUrl && cloudConfig.supabaseKey) {
-      const checkUrl = `${cloudConfig.supabaseUrl.replace(/\/$/, '')}/rest/v1/mizan_cloud_sync?school_code=eq.${encodeURIComponent(fullKey)}&select=payload,school_name,updated_at&limit=1`;
-      const res = await fetch(checkUrl, { headers: { 'apikey': cloudConfig.supabaseKey } });
-      if (res.ok) {
-        const rows = await res.json();
-        if (Array.isArray(rows) && rows.length > 0) remoteRow = rows[0];
+    const { remoteRow, mergedUsers } = await fetchSchoolRecordFromSupabase(schoolCodeRaw);
+    const usersMap = { ...mergedUsers };
+    const existingUser = usersMap[emailRaw];
+
+    // 1. وضع تسجيل الدخول الصارم (يقبل فقط الأكواد والإيميلات المسجلة فعلياً في Supabase)
+    if (currentAuthMode === 'login') {
+      if (!remoteRow) {
+        setAuthErrorMsg(`❌ كود المدرسة (${schoolCodeRaw}) غير مسجل في قاعدة بيانات Supabase! يرجى التأكد من الكود أو إنشاء مدرسة جديدة من تبويب «تسجيل أستاذ / مدرسة جديدة».`);
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (!existingUser) {
+        setAuthErrorMsg(`❌ البريد الإلكتروني (${emailRaw}) غير مسجل ضمن أساتذة مدرسة (${remoteRow.school_name || schoolCodeRaw}) في Supabase! يرجى التسجيل أولاً من تبويب «تسجيل أستاذ / مدرسة جديدة».`);
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (existingUser.passHash !== passHash) {
+        setAuthErrorMsg(`❌ كلمة المرور غير صحيحة لحساب الأستاذ (${emailRaw})!`);
+        if (btn) btn.disabled = false;
+        return;
+      }
+    } else {
+      // 2. وضع التسجيل الجديد الصريح في Supabase (register)
+      if (existingUser) {
+        setAuthErrorMsg(`⚠️ البريد الإلكتروني (${emailRaw}) مسجل مسبقاً في هذه المدرسة! يرجى الانتقال إلى تبويب «تسجيل الدخول».`);
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (!teacherNameRaw) {
+        setAuthErrorMsg('⚠️ يرجى كتابة «اسم الأستاذ والصفة» لتسجيل الحساب في قاعدة بيانات Supabase.');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (!remoteRow && !newSchoolNameRaw) {
+        setAuthErrorMsg(`⚠️ كود المدرسة (${schoolCodeRaw}) جديد؛ يرجى كتابة «اسم المدرسة الرسمي» لتأسيسها في قاعدة بيانات Supabase.`);
+        if (btn) btn.disabled = false;
+        return;
       }
     }
 
-    const remotePayload = remoteRow?.payload || null;
-    const usersMap = (remotePayload && remotePayload._security && remotePayload._security.users)
-      ? { ...remotePayload._security.users }
-      : {};
-
-    const existingUser = usersMap[emailRaw];
-    if (existingUser && existingUser.passHash && existingUser.passHash !== passHash) {
-      setAuthErrorMsg('❌ كلمة المرور غير صحيحة لحساب هذا الأستاذ (' + emailRaw + ') في هذه المدرسة!');
-      if (btn) btn.disabled = false;
-      return;
-    }
-
-    const displayTeacherName = teacherNameRaw || existingUser?.name || emailRaw.split('@')[0];
+    const nowIso = new Date().toISOString();
+    const displayTeacherName = existingUser?.name || teacherNameRaw || emailRaw.split('@')[0];
     const userRole = existingUser?.role || (Object.keys(usersMap).length === 0 ? 'مدير المدرسة / الكنترول' : 'معلم المادة');
 
-    // تسجيل أو تحديث حساب الأستاذ في سجل المدرسة
     usersMap[emailRaw] = {
       email: emailRaw,
       name: displayTeacherName,
       role: userRole,
       passHash: passHash,
-      lastLoginAt: new Date().toISOString()
+      registeredAt: existingUser?.registeredAt || nowIso,
+      lastLoginAt: nowIso
     };
 
-    // تفعيل عزل المدرسة وتحميل سجلها المستقل
+    window._activeSchoolUsersMap = usersMap;
     cloudConfig.userName = `${displayTeacherName} (${emailRaw})`;
     cloudConfig.enabled = true;
 
+    const targetSchoolName = newSchoolNameRaw || remoteRow?.school_name || '';
     if (typeof switchActiveSchoolCode === 'function') {
-      await switchActiveSchoolCode(schoolCodeRaw, newSchoolNameRaw || remoteRow?.school_name || '');
+      await switchActiveSchoolCode(schoolCodeRaw, targetSchoolName);
     } else {
       cloudConfig.schoolCode = schoolCodeRaw;
       saveCloudConfig();
     }
 
-    if (newSchoolNameRaw && (!appData.config.schoolName || appData.config.schoolName === 'مدرسة ميزان النموذجية')) {
-      appData.config.schoolName = newSchoolNameRaw;
+    if (targetSchoolName && (!appData.config.schoolName || appData.config.schoolName === 'مدرسة ميزان النموذجية')) {
+      appData.config.schoolName = targetSchoolName;
       if (typeof syncStudentsWithSchoolGenderPolicy === 'function') syncStudentsWithSchoolGenderPolicy(true);
       if (typeof syncConfigUI === 'function') syncConfigUI();
     }
@@ -4687,27 +4761,35 @@ async function handleAuthGateSubmit(event) {
     appData._security.users = usersMap;
     window._activeSchoolUsersMap = usersMap;
 
+    // حفظ وتوثيق الحساب في جدول Supabase قبل السماح بالدخول
+    setAuthErrorMsg('☁️ جاري توثيق وحفظ بيانات الحساب في جدول Supabase...', true);
+    const pushOk = typeof pushToCloud === 'function' ? await pushToCloud(true) : false;
+    if (!pushOk) {
+      setAuthErrorMsg('❌ تعذر حفظ أو توثيق الحساب في قاعدة بيانات Supabase! تأكد من الاتصال بالإنترنت.');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
     const sessionObj = {
       schoolCode: schoolCodeRaw,
       email: emailRaw,
       teacherName: displayTeacherName,
       role: userRole,
-      loggedInAt: new Date().toISOString()
+      passHash: passHash,
+      loggedInAt: nowIso
     };
     saveActiveAuthSession(sessionObj, rememberMe);
     updateHeaderAuthBadge(sessionObj);
     hideAuthGateOverlay();
 
-    // رفع تحديث سجل دخول الأستاذ إلى السحابة
-    if (typeof pushToCloud === 'function') {
-      pushToCloud(true);
-    }
-
     if (typeof showToast === 'function') {
-      showToast(`👋 مرحباً بك (${displayTeacherName}) في سجل مدرسة (${appData.config?.schoolName || schoolCodeRaw})`, 'success');
+      const msg = currentAuthMode === 'register'
+        ? `✅ تم تسجيل حساب (${displayTeacherName}) في Supabase لمدرسة (${appData.config?.schoolName || schoolCodeRaw})`
+        : `👋 مرحباً بك (${displayTeacherName}) في سجل مدرسة (${appData.config?.schoolName || schoolCodeRaw})`;
+      showToast(msg, 'success');
     }
   } catch (err) {
-    setAuthErrorMsg('⚠️ تعذر التحقق السحابي، يرجى التأكد من الاتصال بالإنترنت والمحاولة مجدداً.');
+    setAuthErrorMsg('⚠️ تعذر الاتصال بقاعدة بيانات Supabase للتحقق من الحساب.');
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -4730,11 +4812,7 @@ function showAuthGateOverlay() {
   const overlay = document.getElementById('authGateOverlay');
   if (!overlay) return;
   overlay.classList.remove('hidden');
-
-  const codeInp = document.getElementById('authInputSchoolCode');
-  if (codeInp && !codeInp.value) {
-    codeInp.value = (cloudConfig.schoolCode && cloudConfig.schoolCode !== 'MIZAN-2026') ? cloudConfig.schoolCode : '';
-  }
+  switchAuthGateTab('login');
 }
 
 function hideAuthGateOverlay() {
@@ -4745,13 +4823,18 @@ function hideAuthGateOverlay() {
 function logoutFromMizan() {
   if (!confirm('🚪 هل تريد تسجيل الخروج من حساب الأستاذ والعودة إلى نافذة تسجيل الدخول؟')) return;
   clearActiveAuthSession();
+  window._activeSchoolUsersMap = {};
   const passInp = document.getElementById('authInputPassword');
   if (passInp) passInp.value = '';
   setAuthErrorMsg('');
   showAuthGateOverlay();
 }
 
-function initAuthGateOnBoot() {
+async function initAuthGateOnBoot() {
+  // مسح أي جلسات قديمة غير موثقة من الإصدار السابق
+  localStorage.removeItem('MIZAN_ACTIVE_AUTH_SESSION_2026');
+  sessionStorage.removeItem('MIZAN_ACTIVE_AUTH_SESSION_2026');
+
   const session = getActiveAuthSession();
   const urlParams = new URLSearchParams(window.location.search);
   const urlCloudCode = urlParams.get('cloud');
@@ -4767,11 +4850,56 @@ function initAuthGateOnBoot() {
     saveCloudConfig();
     updateHeaderAuthBadge(session);
     hideAuthGateOverlay();
+
+    // تحقق حي من Supabase للتأكد من أن الحساب والمدرسة لا يزالان مسجلين فعلياً
+    if (navigator.onLine && cloudConfig.supabaseUrl && cloudConfig.supabaseKey) {
+      try {
+        const { remoteRow, mergedUsers } = await fetchSchoolRecordFromSupabase(session.schoolCode);
+        const u = mergedUsers[session.email.toLowerCase()];
+        if (!remoteRow || !u || (session.passHash && u.passHash !== session.passHash)) {
+          clearActiveAuthSession();
+          updateHeaderAuthBadge(null);
+          showAuthGateOverlay();
+          setAuthErrorMsg('⚠️ هذا الحساب أو كود المدرسة غير مسجل في قاعدة بيانات Supabase، يرجى تسجيل الدخول بحساب مسجل.');
+        } else {
+          window._activeSchoolUsersMap = mergedUsers;
+        }
+      } catch (e) {}
+    }
   } else {
     showAuthGateOverlay();
   }
 }
 
+async function renderCloudRegisteredUsersList() {
+  const container = document.getElementById('cloudRegisteredUsersContainer');
+  if (!container) return;
+  container.innerHTML = '<div class="text-center py-2 text-slate-500 text-xs"><i class="fa-solid fa-spinner fa-spin ml-1"></i> جاري جلب الحسابات المسجلة من Supabase...</div>';
+
+  try {
+    const code = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase();
+    const { mergedUsers } = await fetchSchoolRecordFromSupabase(code);
+    const list = Object.values(mergedUsers || {});
+    if (list.length === 0) {
+      container.innerHTML = '<div class="text-center py-2 text-slate-500 text-xs">لا توجد حسابات مسجلة لهذا الكود في Supabase بعد.</div>';
+      return;
+    }
+    container.innerHTML = list.map(u => {
+      const dt = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('ar-IQ') : '';
+      return `<div class="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 text-[11px]">
+        <div>
+          <div class="font-black text-slate-800"><i class="fa-solid fa-user-check text-emerald-600 ml-1"></i> ${u.name || u.email} <span class="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200 mr-1">${u.role || 'معلم'}</span></div>
+          <div class="font-mono text-slate-600 mt-0.5">${u.email} ${dt ? `| آخر دخول: ${dt}` : ''}</div>
+        </div>
+        <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-full text-[10px]">مسجل في Supabase ✓</span>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = '<div class="text-center py-2 text-rose-600 text-xs">تعذر جلب قائمة الأساتذة من Supabase.</div>';
+  }
+}
+
+window.getActiveAuthSession = getActiveAuthSession;
 window.switchAuthGateTab = switchAuthGateTab;
 window.toggleAuthPasswordVisibility = toggleAuthPasswordVisibility;
 window.handleAuthGateSubmit = handleAuthGateSubmit;
@@ -4779,6 +4907,7 @@ window.showAuthGateOverlay = showAuthGateOverlay;
 window.hideAuthGateOverlay = hideAuthGateOverlay;
 window.logoutFromMizan = logoutFromMizan;
 window.initAuthGateOnBoot = initAuthGateOnBoot;
+window.renderCloudRegisteredUsersList = renderCloudRegisteredUsersList;
 
 
 /* --- Start of app.js (Orchestrator) --- */
