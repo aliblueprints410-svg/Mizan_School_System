@@ -1,7 +1,8 @@
-// وحدة بوابة تسجيل الدخول الموحدة للمدارس والأساتذة (School Code + Teacher Email + Password Auth Gate)
-// الميزانية القصوى: 300 سطر
+// وحدة بوابة تسجيل الدخول الموحدة للمدارس والأساتذة (Unified Supabase Auth Gate)
+// متطابقة 100% مع تطبيق مدرستي بنظام الحسابات السحابي الرسمي وعزل المدارس الصارم
 
 const AUTH_SESSION_KEY = 'MIZAN_VERIFIED_AUTH_SESSION_V2';
+const SYS_TEACHER_SCHOOL_PREFIX = '__SYS_TEACHER_SCHOOL__:';
 
 function getActiveAuthSession() {
   try {
@@ -58,57 +59,157 @@ function setAuthErrorMsg(msg, isSuccess = false) {
   box.innerText = msg;
 }
 
-async function fetchSchoolRecordFromSupabase(schoolCodeRaw) {
-  const cleanCode = String(schoolCodeRaw || '').trim().toUpperCase().replace(/\s+/g, '');
-  if (!cleanCode) return { remoteRow: null, mergedUsers: {} };
+// 1. التحقق من كود المدرسة من جدول schools في Supabase
+async function fetchSchoolFromSupabase(schoolCodeRaw) {
+  const cleanCode = String(schoolCodeRaw || '').trim().replace(/\s+/g, '');
+  if (!cleanCode) return null;
 
   const baseUrl = (cloudConfig.supabaseUrl || '').replace(/\/$/, '');
-  const checkUrl = `${baseUrl}/rest/v1/mizan_cloud_sync?or=(school_code.eq.${encodeURIComponent(cleanCode)},school_code.ilike.${encodeURIComponent(cleanCode)},school_code.ilike.${encodeURIComponent(cleanCode + '_*')})&order=updated_at.desc&select=school_code,payload,school_name,school_level,updated_at,updated_by&limit=10`;
-  const res = await fetch(checkUrl, { headers: { 'apikey': cloudConfig.supabaseKey } });
-  if (!res.ok) throw new Error('SUPABASE_FETCH_ERROR');
-
-  const rawRows = await res.json();
-  const rows = (Array.isArray(rawRows) ? rawRows : []).filter(r => r && r.school_code !== 'TEST_VERIFY_SYNC');
-  if (rows.length === 0) return { remoteRow: null, mergedUsers: {} };
-
-  const mergedUsers = {};
-  [...rows].reverse().forEach(r => {
-    const uMap = r?.payload?._security?.users || {};
-    Object.assign(mergedUsers, uMap);
-
-    // قراءة الأساتذة المضافين مباشرة من لوحة Supabase داخل _registered_teachers
-    const arr = r?.payload?._registered_teachers;
-    if (Array.isArray(arr)) {
-      arr.forEach(item => {
-        if (item && item.email) {
-          const em = String(item.email).trim().toLowerCase();
-          mergedUsers[em] = { ...(mergedUsers[em] || {}), ...item, email: em };
-        }
-      });
+  const url = `${baseUrl}/rest/v1/schools?school_code=ilike.${encodeURIComponent(cleanCode)}&select=id,name,school_code&limit=1`;
+  const res = await fetch(url, {
+    headers: {
+      'apikey': cloudConfig.supabaseKey,
+      'Authorization': `Bearer ${cloudConfig.supabaseKey}`
     }
   });
 
-  const exactRow = rows.find(r => r.school_code.toUpperCase() === cleanCode)
-    || rows.find(r => r.school_code.toUpperCase().startsWith(cleanCode + '_'))
-    || rows[0];
-
-  return { remoteRow: exactRow, mergedUsers };
+  if (!res.ok) throw new Error('SCHOOL_QUERY_ERROR');
+  const rows = await res.json();
+  return (Array.isArray(rows) && rows.length > 0) ? rows[0] : null;
 }
 
+// 2. تسجيل دخول الأستاذ عبر محرك المصادقة السحابي الرسمي Supabase Auth
+async function loginTeacherWithSupabase(email, password) {
+  const baseUrl = (cloudConfig.supabaseUrl || '').replace(/\/$/, '');
+  const authUrl = `${baseUrl}/auth/v1/token?grant_type=password`;
+
+  const res = await fetch(authUrl, {
+    method: 'POST',
+    headers: {
+      'apikey': cloudConfig.supabaseKey,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+      password: password.trim()
+    })
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    const errorMsg = data.error_description || data.msg || data.message || '';
+    if (errorMsg.includes('Invalid login credentials') || errorMsg.includes('invalid_grant')) {
+      throw new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة. يرجى التأكد من البيانات أو استخدام خيار نسيت كلمة المرور.');
+    }
+    throw new Error(errorMsg || 'فشل تسجيل الدخول من خادم المصادقة.');
+  }
+
+  return data;
+}
+
+// 3. التحقق من عزل المدارس وربط الأستاذ بالمدرسة (بما يطابق تطبيق مدرستي)
+async function verifyAndBindTeacherSchool(user, accessToken, school, cleanEmail) {
+  let boundSchoolId = user?.user_metadata?.school_id;
+  let boundSchoolCode = user?.user_metadata?.school_code;
+  let boundSchoolName = user?.user_metadata?.school_name;
+
+  // فحص سجل ربط الأساتذة في جدول announcements كنسخة احتياطية
+  const baseUrl = (cloudConfig.supabaseUrl || '').replace(/\/$/, '');
+  const sysTitle = `${SYS_TEACHER_SCHOOL_PREFIX}${cleanEmail}`;
+  try {
+    const checkUrl = `${baseUrl}/rest/v1/announcements?title=eq.${encodeURIComponent(sysTitle)}&order=created_at.desc&select=content&limit=1`;
+    const annRes = await fetch(checkUrl, {
+      headers: {
+        'apikey': cloudConfig.supabaseKey,
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    if (annRes.ok) {
+      const rows = await annRes.json();
+      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.content) {
+        const parsed = JSON.parse(rows[0].content);
+        boundSchoolId = boundSchoolId || parsed.school_id;
+        boundSchoolCode = boundSchoolCode || parsed.school_code;
+        boundSchoolName = boundSchoolName || parsed.school_name;
+      }
+    }
+  } catch (e) {}
+
+  // حظر الدخول إذا كان حساب الأستاذ مسجلاً ومقيداً بمدرسة أخرى
+  if (boundSchoolId && boundSchoolId !== school.id) {
+    const other = boundSchoolName || boundSchoolCode || 'مدرسة أخرى';
+    throw new Error(`عذراً، حساب الأستاذ هذا تابع لـ (${other}) ولا يمكنه الدخول إلى (${school.name})!`);
+  }
+  if (boundSchoolCode && boundSchoolCode.toLowerCase() !== school.school_code.toLowerCase()) {
+    const other = boundSchoolName || boundSchoolCode;
+    throw new Error(`عذراً، حساب الأستاذ هذا تابع لـ (${other}) ولا يمكنه الدخول إلى (${school.name})!`);
+  }
+
+  // إذا لم يكن الحساب مقيداً بعد، نقيده تلقائياً بهذه المدرسة
+  if (!boundSchoolId) {
+    try {
+      await fetch(`${baseUrl}/auth/v1/user`, {
+        method: 'PUT',
+        headers: {
+          'apikey': cloudConfig.supabaseKey,
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          data: {
+            school_id: school.id,
+            school_code: school.school_code,
+            school_name: school.name
+          }
+        })
+      });
+
+      const randomId = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : 'mizan_' + Date.now();
+
+      await fetch(`${baseUrl}/rest/v1/announcements`, {
+        method: 'POST',
+        headers: {
+          'apikey': cloudConfig.supabaseKey,
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({
+          id: randomId,
+          school_id: school.id,
+          title: sysTitle,
+          content: JSON.stringify({
+            email: cleanEmail,
+            school_id: school.id,
+            school_code: school.school_code,
+            school_name: school.name
+          }),
+          created_at: new Date().toISOString(),
+          priority: false,
+          is_deleted: false
+        })
+      });
+    } catch (_) {}
+  }
+}
+
+// 4. معالجة نموذج تسجيل الدخول الموحد
 async function handleAuthGateSubmit(event) {
   if (event) event.preventDefault();
 
-  const schoolCodeRaw = (document.getElementById('authInputSchoolCode')?.value || '').trim().toUpperCase().replace(/\s+/g, '');
+  const schoolCodeRaw = (document.getElementById('authInputSchoolCode')?.value || '').trim();
   const emailRaw = (document.getElementById('authInputEmail')?.value || '').trim().toLowerCase();
   const passwordRaw = (document.getElementById('authInputPassword')?.value || '').trim();
   const rememberMe = !!document.getElementById('authInputRemember')?.checked;
 
   if (!schoolCodeRaw) {
-    setAuthErrorMsg('⚠️ يرجى إدخال كود المدرسة (مثال: 101 أو AMZA أو SCH-1).');
+    setAuthErrorMsg('⚠️ يرجى إدخال كود المدرسة (مثال: SCH-1 أو SCH-2 أو SCH-1234).');
     return;
   }
   if (!emailRaw || !emailRaw.includes('@')) {
-    setAuthErrorMsg('⚠️ يرجى إدخال البريد الإلكتروني للأستاذ بصيغة صحيحة (مثال: teacher@gmail.com).');
+    setAuthErrorMsg('⚠️ يرجى إدخال بريد إلكتروني صحيح للأستاذ.');
     return;
   }
   if (!passwordRaw) {
@@ -117,85 +218,58 @@ async function handleAuthGateSubmit(event) {
   }
 
   if (!navigator.onLine || !cloudConfig.supabaseUrl || !cloudConfig.supabaseKey) {
-    setAuthErrorMsg('⚠️ يلزم الاتصال بالإنترنت للتحقق من قاعدة بيانات Supabase.');
+    setAuthErrorMsg('⚠️ يلزم الاتصال بالإنترنت للتحقق من بيانات الدخول في خادم السحابة.');
     return;
   }
 
   const btn = document.getElementById('authSubmitBtn');
   if (btn) btn.disabled = true;
-  setAuthErrorMsg('🔄 جاري فحص قاعدة بيانات Supabase للتحقق من كود المدرسة وحساب الأستاذ...', true);
+  setAuthErrorMsg('🔄 جاري التحقق من كود المدرسة وحساب الأستاذ في Supabase...', true);
 
   try {
-    const passHash = typeof computeCloudPinHash === 'function'
-      ? await computeCloudPinHash(passwordRaw, `${schoolCodeRaw}::${emailRaw}`)
-      : passwordRaw;
-
-    const { remoteRow, mergedUsers } = await fetchSchoolRecordFromSupabase(schoolCodeRaw);
-    const existingUser = mergedUsers[emailRaw];
-
-    if (!remoteRow) {
-      setAuthErrorMsg(`❌ كود المدرسة (${schoolCodeRaw}) غير مسجل في السحابة! يرجى مراجعة إدارة المنظومة لتفعيل كود مدرستك.`);
+    // أ. التحقق من كود المدرسة
+    const school = await fetchSchoolFromSupabase(schoolCodeRaw);
+    if (!school) {
+      setAuthErrorMsg(`❌ كود المدرسة (${schoolCodeRaw}) غير مسجل في السحابة! تأكد من الكود المعتمد في جدول المدارس.`);
       if (btn) btn.disabled = false;
       return;
     }
 
-    if (!existingUser) {
-      setAuthErrorMsg(`❌ البريد الإلكتروني (${emailRaw}) غير مضاف ضمن أساتذة مدرسة (${remoteRow.school_name || schoolCodeRaw})! يرجى التواصل مع الإدارة لتفعيل حسابك.`);
-      if (btn) btn.disabled = false;
-      return;
-    }
+    // ب. مصادقة حساب الأستاذ عبر Supabase Auth
+    const authData = await loginTeacherWithSupabase(emailRaw, passwordRaw);
+    const user = authData.user;
+    const accessToken = authData.access_token;
+    const refreshToken = authData.refresh_token;
 
-    const isHashMatch = existingUser.passHash && existingUser.passHash === passHash;
-    const isPlainMatch = existingUser.password && String(existingUser.password).trim() === passwordRaw;
+    // ج. التحقق من قيود المدرسة وعزل البيانات
+    await verifyAndBindTeacherSchool(user, accessToken, school, emailRaw);
 
-    let isAltHashMatch = false;
-    if (!isHashMatch && existingUser.passHash && typeof computeCloudPinHash === 'function') {
-      const altHash = await computeCloudPinHash(passwordRaw, schoolCodeRaw);
-      if (existingUser.passHash === altHash) isAltHashMatch = true;
-    }
+    // د. إعداد الجلسة وبيانات النظام
+    const displayTeacherName = user?.user_metadata?.name || user?.user_metadata?.full_name || emailRaw.split('@')[0];
+    const userRole = user?.user_metadata?.role || 'معلم المادة';
 
-    if (!isHashMatch && !isPlainMatch && !isAltHashMatch) {
-      setAuthErrorMsg(`❌ كلمة المرور غير صحيحة لحساب الأستاذ (${emailRaw})!`);
-      if (btn) btn.disabled = false;
-      return;
-    }
-
-    const nowIso = new Date().toISOString();
-    const displayTeacherName = existingUser?.name || emailRaw.split('@')[0];
-    const userRole = existingUser?.role || 'معلم المادة';
-
+    cloudConfig.schoolCode = school.school_code;
+    cloudConfig.fullSchoolKey = school.school_code;
     cloudConfig.userName = `${displayTeacherName} (${emailRaw})`;
     cloudConfig.enabled = true;
+    saveCloudConfig();
 
-    const targetSchoolName = remoteRow.school_name || '';
-    const targetFullKey = remoteRow.school_code || schoolCodeRaw;
-
-    if (typeof switchActiveSchoolCode === 'function') {
-      await switchActiveSchoolCode(schoolCodeRaw, targetSchoolName, null, targetFullKey);
-    } else {
-      cloudConfig.schoolCode = schoolCodeRaw;
-      cloudConfig.fullSchoolKey = targetFullKey;
-      saveCloudConfig();
-    }
-
-    if (targetSchoolName && (!appData.config.schoolName || appData.config.schoolName === 'مدرسة ميزان النموذجية')) {
-      appData.config.schoolName = targetSchoolName;
+    if (school.name && (!appData.config.schoolName || appData.config.schoolName === 'مدرسة ميزان النموذجية')) {
+      appData.config.schoolName = school.name;
       if (typeof syncStudentsWithSchoolGenderPolicy === 'function') syncStudentsWithSchoolGenderPolicy(true);
       if (typeof syncConfigUI === 'function') syncConfigUI();
     }
 
-    if (!appData._security) appData._security = {};
-    appData._security.users = mergedUsers;
-    window._activeSchoolUsersMap = mergedUsers;
-
     const sessionObj = {
-      schoolCode: schoolCodeRaw,
-      fullSchoolKey: targetFullKey,
+      schoolCode: school.school_code,
+      schoolId: school.id,
+      schoolName: school.name,
       email: emailRaw,
       teacherName: displayTeacherName,
       role: userRole,
-      passHash: passHash,
-      loggedInAt: nowIso
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+      loggedInAt: new Date().toISOString()
     };
 
     saveActiveAuthSession(sessionObj, rememberMe);
@@ -203,12 +277,57 @@ async function handleAuthGateSubmit(event) {
     hideAuthGateOverlay();
 
     if (typeof showToast === 'function') {
-      showToast(`👋 مرحباً بك (${displayTeacherName}) في سجل مدرسة (${appData.config?.schoolName || schoolCodeRaw})`, 'success');
+      showToast(`👋 أهلاً بك يا أستاذ (${displayTeacherName}) في إدارة: ${school.name}`, 'success');
+    }
+
+    // جلب أحدث شيتات ميزان لهذه المدرسة
+    if (typeof pullFromCloud === 'function') {
+      setTimeout(() => pullFromCloud(true), 400);
     }
   } catch (err) {
-    setAuthErrorMsg('⚠️ تعذر الاتصال بقاعدة بيانات Supabase للتحقق من الحساب.');
+    const cleanMsg = (err.message || 'تعذر التحقق من الحساب.').replace('Error: ', '');
+    setAuthErrorMsg(`❌ ${cleanMsg}`);
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+// 5. استعادة كلمة المرور وإرسال رابط التعيين للبريد الرسمي للأستاذ
+async function requestPasswordReset() {
+  const emailInput = document.getElementById('authInputEmail');
+  let email = (emailInput?.value || '').trim().toLowerCase();
+
+  if (!email || !email.includes('@')) {
+    email = prompt('📧 أدخل البريد الإلكتروني الخاص بحسابك لتلقي رابط إعادة تعيين كلمة المرور:');
+  }
+
+  if (!email || !email.includes('@')) {
+    alert('يرجى كتابة بريد إلكتروني صحيح.');
+    return;
+  }
+
+  setAuthErrorMsg('🔄 جاري إرسال رابط تعيين كلمة المرور إلى بريدك...', true);
+
+  try {
+    const baseUrl = (cloudConfig.supabaseUrl || '').replace(/\/$/, '');
+    const res = await fetch(`${baseUrl}/auth/v1/recover`, {
+      method: 'POST',
+      headers: {
+        'apikey': cloudConfig.supabaseKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email: email.trim().toLowerCase() })
+    });
+
+    if (res.ok) {
+      setAuthErrorMsg(`📩 تم إرسال رابط تعيين كلمة المرور إلى (${email}).`, true);
+      alert(`📩 تم إرسال رابط إعادة تعيين كلمة المرور إلى:\n${email}\n\nيرجى مراجعة بريدك الإلكتروني (الوارد أو الرسائل غير المرغوب فيها Spam) والضغط على الرابط لتحديد كلمة مرورك الجديدة.`);
+    } else {
+      const errData = await res.json();
+      setAuthErrorMsg(`⚠️ تعذر الإرسال: ${errData.msg || errData.message || 'تأكد من صحة البريد'}`);
+    }
+  } catch (e) {
+    setAuthErrorMsg('⚠️ حدث خطأ في الاتصال بالسيرفر لإرسال الرابط.');
   }
 }
 
@@ -239,17 +358,14 @@ function hideAuthGateOverlay() {
 function logoutFromMizan() {
   if (!confirm('🚪 هل تريد تسجيل الخروج من حساب الأستاذ والعودة إلى نافذة تسجيل الدخول؟')) return;
   clearActiveAuthSession();
-  window._activeSchoolUsersMap = {};
   const passInp = document.getElementById('authInputPassword');
   if (passInp) passInp.value = '';
   setAuthErrorMsg('');
   showAuthGateOverlay();
 }
 
+// 6. التحقق التلقائي عند بدء التشغيل مع دعم أوفلاين الصارم
 async function initAuthGateOnBoot() {
-  localStorage.removeItem('MIZAN_ACTIVE_AUTH_SESSION_2026');
-  sessionStorage.removeItem('MIZAN_ACTIVE_AUTH_SESSION_2026');
-
   const session = getActiveAuthSession();
   const urlParams = new URLSearchParams(window.location.search);
   const urlCloudCode = urlParams.get('cloud');
@@ -259,25 +375,45 @@ async function initAuthGateOnBoot() {
     if (codeInp) codeInp.value = urlCloudCode.trim().toUpperCase().replace(/\s+/g, '');
   }
 
-  if (session && session.schoolCode && session.email && (!urlCloudCode || urlCloudCode.toUpperCase() === session.schoolCode)) {
+  if (session && session.schoolCode && session.email && (!urlCloudCode || urlCloudCode.toUpperCase() === session.schoolCode.toUpperCase())) {
     cloudConfig.schoolCode = session.schoolCode;
-    cloudConfig.fullSchoolKey = session.fullSchoolKey || session.schoolCode;
+    cloudConfig.fullSchoolKey = session.schoolCode;
     cloudConfig.userName = `${session.teacherName || session.email} (${session.email})`;
-    saveCloudConfig();
     updateHeaderAuthBadge(session);
     hideAuthGateOverlay();
 
-    if (navigator.onLine && cloudConfig.supabaseUrl && cloudConfig.supabaseKey) {
+    // التحقق بالخلفية إذا كان هناك إنترنت وتجديد التوكن
+    if (navigator.onLine && cloudConfig.supabaseUrl && cloudConfig.supabaseKey && session.accessToken) {
       try {
-        const { remoteRow, mergedUsers } = await fetchSchoolRecordFromSupabase(session.schoolCode);
-        const u = mergedUsers[session.email.toLowerCase()];
-        if (!remoteRow || !u) {
-          clearActiveAuthSession();
-          updateHeaderAuthBadge(null);
-          showAuthGateOverlay();
-          setAuthErrorMsg('⚠️ هذا الحساب أو كود المدرسة غير مسجل في قاعدة بيانات Supabase، يرجى تسجيل الدخول بحساب مسجل.');
-        } else {
-          window._activeSchoolUsersMap = mergedUsers;
+        const baseUrl = cloudConfig.supabaseUrl.replace(/\/$/, '');
+        const verifyRes = await fetch(`${baseUrl}/auth/v1/user`, {
+          headers: {
+            'apikey': cloudConfig.supabaseKey,
+            'Authorization': `Bearer ${session.accessToken}`
+          }
+        });
+
+        if (!verifyRes.ok && session.refreshToken) {
+          // محاولة تجديد الجلسة بالـ refreshToken
+          const refreshRes = await fetch(`${baseUrl}/auth/v1/token?grant_type=refresh_token`, {
+            method: 'POST',
+            headers: {
+              'apikey': cloudConfig.supabaseKey,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ refresh_token: session.refreshToken })
+          });
+          if (refreshRes.ok) {
+            const freshData = await refreshRes.json();
+            session.accessToken = freshData.access_token;
+            session.refreshToken = freshData.refresh_token;
+            saveActiveAuthSession(session, true);
+          } else {
+            clearActiveAuthSession();
+            updateHeaderAuthBadge(null);
+            showAuthGateOverlay();
+            setAuthErrorMsg('⚠️ انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.');
+          }
         }
       } catch (e) {}
     }
@@ -286,39 +422,11 @@ async function initAuthGateOnBoot() {
   }
 }
 
-async function renderCloudRegisteredUsersList() {
-  const container = document.getElementById('cloudRegisteredUsersContainer');
-  if (!container) return;
-  container.innerHTML = '<div class="text-center py-2 text-slate-500 text-xs"><i class="fa-solid fa-spinner fa-spin ml-1"></i> جاري جلب الحسابات المسجلة من Supabase...</div>';
-
-  try {
-    const code = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase().replace(/\s+/g, '');
-    const { mergedUsers } = await fetchSchoolRecordFromSupabase(code);
-    const list = Object.values(mergedUsers || {});
-    if (list.length === 0) {
-      container.innerHTML = '<div class="text-center py-2 text-slate-500 text-xs">لا توجد حسابات مسجلة لهذا الكود في Supabase بعد.</div>';
-      return;
-    }
-    container.innerHTML = list.map(u => {
-      const dt = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('ar-IQ') : '';
-      return `<div class="flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 text-[11px]">
-        <div>
-          <div class="font-black text-slate-800"><i class="fa-solid fa-user-check text-emerald-600 ml-1"></i> ${u.name || u.email} <span class="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200 mr-1">${u.role || 'معلم'}</span></div>
-          <div class="font-mono text-slate-600 mt-0.5">${u.email} ${dt ? `| آخر دخول: ${dt}` : ''}</div>
-        </div>
-        <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-full text-[10px]">معتمد في Supabase ✓</span>
-      </div>`;
-    }).join('');
-  } catch (e) {
-    container.innerHTML = '<div class="text-center py-2 text-rose-600 text-xs">تعذر جلب قائمة الأساتذة من Supabase.</div>';
-  }
-}
-
 window.getActiveAuthSession = getActiveAuthSession;
 window.toggleAuthPasswordVisibility = toggleAuthPasswordVisibility;
 window.handleAuthGateSubmit = handleAuthGateSubmit;
+window.requestPasswordReset = requestPasswordReset;
 window.showAuthGateOverlay = showAuthGateOverlay;
 window.hideAuthGateOverlay = hideAuthGateOverlay;
 window.logoutFromMizan = logoutFromMizan;
 window.initAuthGateOnBoot = initAuthGateOnBoot;
-window.renderCloudRegisteredUsersList = renderCloudRegisteredUsersList;

@@ -4,9 +4,9 @@
 const CLOUD_CONFIG_KEY = 'MIZAN_CLOUD_SYNC_CONFIG_2026';
 
 let cloudConfig = {
-  supabaseUrl: 'https://rrlesmhpaanbpbcpdmre.supabase.co',
-  supabaseKey: 'sb_publishable_gEAknXzFn1VWqD5jYwduAA_9w9ePzdU',
-  schoolCode: 'MIZAN-2026',
+  supabaseUrl: 'https://imnqwelbgxxnegapowpu.supabase.co',
+  supabaseKey: 'sb_publishable_Pf2C0cVb5IsXAWvFBYOrSQ_D09k-Ho_',
+  schoolCode: 'SCH-1',
   secretPin: '',
   userName: 'إدارة المدرسة / الكنترول',
   autoSync: true,
@@ -25,7 +25,7 @@ function loadCloudConfig() {
     const raw = localStorage.getItem(CLOUD_CONFIG_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed.supabaseUrl && parsed.supabaseUrl.includes('imnqwelbgxxnegapowpu')) {
+      if (parsed.supabaseUrl && (parsed.supabaseUrl.includes('rrlesmhpaanbpbcpdmre') || !parsed.supabaseUrl.includes('imnqwelbgxxnegapowpu'))) {
         delete parsed.supabaseUrl;
         delete parsed.supabaseKey;
       }
@@ -418,7 +418,26 @@ function initCloudSyncEngine() {
   }
 }
 
-window.getActiveSchoolCode = () => (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase().replace(/\s+/g, '-');
+function copyCloudSetupSql() {
+  const sql = `CREATE TABLE IF NOT EXISTS public.mizan_cloud_sync (
+  school_code TEXT PRIMARY KEY,
+  school_name TEXT DEFAULT '',
+  school_level TEXT DEFAULT 'primary',
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  updated_by TEXT DEFAULT 'الكنترول'
+);
+ALTER TABLE public.mizan_cloud_sync ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow all mizan_cloud_sync" ON public.mizan_cloud_sync;
+CREATE POLICY "Allow all mizan_cloud_sync" ON public.mizan_cloud_sync FOR ALL USING (true) WITH CHECK (true);`;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(sql).then(() => alert('✅ تم نسخ كود SQL بنجاح!\n\n1. افتح مشروع مدرستي في لوحة Supabase.\n2. ادخل على (SQL Editor).\n3. الصق الكود واضغط (RUN).\nوسيعمل حفظ درجات ميزان تلقائياً!')).catch(() => prompt('انسخ كود SQL أدناه يدوياً:', sql));
+  } else {
+    prompt('انسخ كود SQL أدناه يدوياً:', sql);
+  }
+}
+
+window.getActiveSchoolCode = () => (cloudConfig.schoolCode || 'SCH-1').trim().toUpperCase().replace(/\s+/g, '-');
 window.loadCloudConfig = loadCloudConfig;
 window.pushToCloud = pushToCloud;
 window.pullFromCloud = pullFromCloud;
@@ -426,4 +445,5 @@ window.scheduleCloudPush = scheduleCloudPush;
 window.openCloudSyncModal = openCloudSyncModal;
 window.closeCloudSyncModal = closeCloudSyncModal;
 window.saveCloudSettingsFromModal = saveCloudSettingsFromModal;
+window.copyCloudSetupSql = copyCloudSetupSql;
 window.initCloudSyncEngine = initCloudSyncEngine;
