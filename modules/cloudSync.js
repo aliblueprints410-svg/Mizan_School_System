@@ -43,9 +43,9 @@ function saveCloudConfig() {
 }
 
 function getFullSchoolCloudKey() {
-  const code = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase().replace(/\s+/g, '-');
-  const lvl = appData?.config?.schoolLevel || 'primary';
-  return `${code}_${lvl}`;
+  if (cloudConfig.fullSchoolKey) return cloudConfig.fullSchoolKey;
+  const code = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase().replace(/\s+/g, '');
+  return code;
 }
 
 function updateCloudUiBadge(state, customText = '') {

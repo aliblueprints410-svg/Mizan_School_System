@@ -33,55 +33,17 @@
         <p class="text-[11px] text-indigo-200 mt-0.5">عزل تام لبيانات كل مدرسة ومزامنة فورية لحسابات الأساتذة</p>
       </div>
 
-      <!-- تبويبات: تسجيل دخول الأساتذة / لوحة المطور الحصرية -->
-      <div class="px-6 pt-4">
-        <div class="flex bg-slate-950/80 p-1 rounded-xl border border-slate-800 gap-1">
-          <button type="button" id="tabBtnAuthLogin" onclick="switchAuthGateTab('login')" class="flex-1 py-2 rounded-lg font-black text-xs bg-amber-400 text-slate-950 shadow transition">
-            <i class="fa-solid fa-right-to-bracket ml-1"></i> تسجيل دخول الأساتذة
-          </button>
-          <button type="button" id="tabBtnAuthRegister" onclick="switchAuthGateTab('register')" class="flex-1 py-2 rounded-lg font-bold text-xs text-indigo-200 hover:text-white transition">
-            <i class="fa-solid fa-crown text-amber-400 ml-1"></i> لوحة المطور (إضافة مدرسة/أستاذ)
-          </button>
-        </div>
-      </div>
-
-      <!-- نموذج الإدخال -->
-      <form onsubmit="handleAuthGateSubmit(event)" class="p-6 space-y-3.5 text-xs">
+      <!-- نموذج تسجيل الدخول المباشر الموحد -->
+      <form onsubmit="handleAuthGateSubmit(event)" class="p-6 space-y-4 text-xs">
         <div id="authGateErrorBox" class="hidden"></div>
-
-        <!-- حقل خاص بالمطور فقط يظهر في تبويب لوحة المطور -->
-        <div id="authRegisterExtraFields" class="hidden space-y-3 p-3 rounded-2xl bg-amber-500/10 border border-amber-400/40">
-          <div class="text-[11px] font-black text-amber-300 flex items-center justify-between border-b border-amber-400/20 pb-1.5">
-            <span><i class="fa-solid fa-shield-halved ml-1"></i> صلاحية المطور الحصرية (إدارة التراخيص)</span>
-            <span class="bg-amber-400 text-slate-950 px-2 py-0.5 rounded text-[10px]">للمطور فقط</span>
-          </div>
-          <div>
-            <label class="block font-bold text-amber-300 mb-1">
-              <i class="fa-solid fa-user-secret ml-1"></i> الرمز السري للمطور (Developer Master Key):
-            </label>
-            <input type="password" id="authInputDevMasterKey" placeholder="أدخل رمز المطور السري لإضافة مدرسة أو إيميل..." dir="ltr" class="w-full bg-slate-950 border-2 border-amber-400/60 focus:border-amber-300 rounded-xl px-3.5 py-2 font-mono text-amber-200 text-center outline-none">
-          </div>
-          <div>
-            <label class="block font-bold text-indigo-200 mb-1">
-              <i class="fa-solid fa-user-tie text-amber-400 ml-1"></i> اسم الأستاذ والصفة:
-            </label>
-            <input type="text" id="authInputTeacherName" placeholder="مثال: أستاذ علي - مدير المدرسة / معلم المادة" class="w-full bg-slate-950/90 border border-slate-700 focus:border-indigo-400 rounded-xl px-3.5 py-2 text-white outline-none">
-          </div>
-          <div>
-            <label class="block font-bold text-indigo-200 mb-1">
-              <i class="fa-solid fa-building-columns text-amber-400 ml-1"></i> اسم المدرسة الرسمي (عند تأسيس كود جديد):
-            </label>
-            <input type="text" id="authInputNewSchoolName" placeholder="مثال: مدرسة أمزا للبنين" class="w-full bg-slate-950/90 border border-slate-700 focus:border-indigo-400 rounded-xl px-3.5 py-2 text-white outline-none">
-          </div>
-        </div>
 
         <!-- 1. كود المدرسة -->
         <div>
           <label class="block font-bold text-amber-300 mb-1.5 flex items-center justify-between">
             <span><i class="fa-solid fa-school ml-1"></i> كود المدرسة المعتمد (School Code):</span>
-            <span class="text-[10px] text-indigo-300 font-normal">يعزل بيانات مدرستك 100%</span>
+            <span class="text-[10px] text-indigo-300 font-normal">مثال: 101 أو AMZA أو SCH-1</span>
           </label>
-          <input type="text" id="authInputSchoolCode" required placeholder="مثال: SCH-1 أو AMZA-2026" dir="ltr" class="w-full bg-slate-950/90 border-2 border-indigo-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-center font-mono font-black text-sm text-amber-300 tracking-wider uppercase outline-none transition">
+          <input type="text" id="authInputSchoolCode" required placeholder="اكتب كود المدرسة (مثال: 101 أو AMZA)" dir="ltr" class="w-full bg-slate-950/90 border-2 border-indigo-500/40 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-center font-mono font-black text-sm text-amber-300 tracking-wider uppercase outline-none transition">
         </div>
 
         <!-- 2. إيميل الأستاذ -->
@@ -95,7 +57,7 @@
         <!-- 3. كلمة المرور -->
         <div>
           <label class="block font-bold text-indigo-100 mb-1.5">
-            <i class="fa-solid fa-key text-emerald-400 ml-1"></i> كلمة المرور للأستاذ (Password):
+            <i class="fa-solid fa-key text-emerald-400 ml-1"></i> كلمة المرور (Password):
           </label>
           <div class="relative">
             <input type="password" id="authInputPassword" required placeholder="••••••••" dir="ltr" class="w-full bg-slate-950/90 border border-slate-700 focus:border-emerald-400 rounded-xl pl-10 pr-3.5 py-2.5 font-mono text-white text-left outline-none transition">
@@ -117,7 +79,7 @@
 
         <button type="submit" id="authSubmitBtn" class="w-full py-3 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm">
           <i class="fa-solid fa-unlock-keyhole"></i>
-          <span id="authSubmitBtnText">تسجيل الدخول (للحسابات المعتمدة فقط)</span>
+          <span id="authSubmitBtnText">تسجيل الدخول للمنظومة</span>
         </button>
       </form>
 

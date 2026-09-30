@@ -344,10 +344,9 @@ function renderSavedSchoolsSwitcher() {
   }).join('');
 }
 
-async function switchActiveSchoolCode(targetCode, customSchoolName = '', customPin = null) {
-  const cleanTarget = String(targetCode || '').trim().toUpperCase().replace(/\s+/g, '-');
+async function switchActiveSchoolCode(targetCode, customSchoolName = '', customPin = null, customFullKey = '') {
+  const cleanTarget = String(targetCode || '').trim().toUpperCase().replace(/\s+/g, '');
   if (!cleanTarget) return;
-  const oldCode = (cloudConfig.schoolCode || 'MIZAN-2026').trim().toUpperCase();
   const lvl = appData?.config?.schoolLevel || 'primary';
 
   // 1. حفظ المدرسة الحالية في خزنتها المعزولة قبل الانتقال
@@ -357,6 +356,7 @@ async function switchActiveSchoolCode(targetCode, customSchoolName = '', customP
   // 2. تحديث رمز المدرسة النشط
   const savedItem = getSavedSchoolsList().find(x => x.code === cleanTarget);
   cloudConfig.schoolCode = cleanTarget;
+  cloudConfig.fullSchoolKey = customFullKey || (savedItem?.fullKey || cleanTarget);
   if (customPin !== null) cloudConfig.secretPin = customPin;
   else if (savedItem && savedItem.pin !== undefined) cloudConfig.secretPin = savedItem.pin;
   saveCloudConfig();
@@ -392,25 +392,8 @@ async function switchActiveSchoolCode(targetCode, customSchoolName = '', customP
   await pullFromCloud(false);
 }
 
-async function createNewIsolatedSchoolPrompt() {
-  const schoolName = prompt('🏫 أدخل اسم المدرسة الجديدة (مثال: مدرسة النور للبنات):');
-  if (!schoolName || !schoolName.trim()) return;
-  const rnd = Math.floor(1000 + Math.random() * 9000);
-  const suggestedCode = `SCH-${rnd}`;
-  const schoolCode = prompt(`🔑 أدخل رمز السحابة الخاص بـ (${schoolName.trim()})\n(هذا الرمز يعزل بيانات هذه المدرسة 100% عن باقي المدارس):`, suggestedCode);
-  if (!schoolCode || !schoolCode.trim()) return;
-  const pin = prompt('🔒 اختياري: أدخل الرمز السري (PIN) لحماية سحابة هذه المدرسة (أو اتركه فارغاً):', '') || '';
-
-  await switchActiveSchoolCode(schoolCode.trim().toUpperCase(), schoolName.trim(), pin.trim());
-  if (appData?.config) {
-    appData.config.schoolName = schoolName.trim();
-    if (typeof syncStudentsWithSchoolGenderPolicy === 'function') syncStudentsWithSchoolGenderPolicy(true);
-    if (typeof syncConfigUI === 'function') syncConfigUI();
-    if (typeof saveData === 'function') saveData();
-  }
-  if (typeof showToast === 'function') {
-    showToast(`🎉 تم إنشاء وعزل سجل (${schoolName.trim()}) بالكود (${schoolCode.trim().toUpperCase()}) بنجاح!`, 'success');
-  }
+function createNewIsolatedSchoolPrompt() {
+  if (typeof logoutFromMizan === 'function') logoutFromMizan();
 }
 
 window.computeCloudPinHash = computeCloudPinHash;
