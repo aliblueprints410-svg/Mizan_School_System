@@ -4701,22 +4701,21 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
         window.takeSnapshot('قبل استيراد درجات من ملف إكسل');
       }
 
-      const lvl = appData.config?.schoolLevel || 'primary';
-      const allSubjects = (window.SUBJECTS_BY_LEVEL && window.SUBJECTS_BY_LEVEL[lvl]) || [];
-
-      const subjectMap = {};
-      allSubjects.forEach(s => {
-        subjectMap[s.name.trim()] = s.id;
-        subjectMap[s.id] = s.id;
-      });
-      Object.assign(subjectMap, {
-        'اسلامية': 'islamic', 'التربية الاسلامية': 'islamic', 'الاسلامية': 'islamic',
-        'عربي': 'arabic', 'اللغة العربية': 'arabic', 'قراءة': 'arabic', 'القراءة': 'arabic',
-        'انكليزي': 'english', 'انجليزي': 'english', 'الانكليزية': 'english', 'اللغة الانكليزية': 'english', 'اللغة الإنجليزية': 'english',
-        'رياضيات': 'math', 'الرياضيات': 'math', 'علوم': 'science', 'العلوم': 'science',
-        'اجتماعيات': 'social', 'الاجتماعيات': 'social', 'اخلاقية': 'ethics', 'التربية الاخلاقية': 'ethics',
-        'رياضة': 'sport', 'فنية': 'art'
-      });
+      const subjectMap = {
+        'اسلامية': 'islamic', 'الاسلامية': 'islamic', 'التربية الاسلامية': 'islamic', 'التربية الإسلامية': 'islamic',
+        'قراءة': 'reading', 'القراءة': 'reading',
+        'عربي': 'arabic', 'العربية': 'arabic', 'اللغة العربية': 'arabic',
+        'انكليزي': 'english', 'إنكليزي': 'english', 'انجليزي': 'english',
+        'الانكليزية': 'english', 'الإنكليزية': 'english', 'الانجليزية': 'english', 'الإنجليزية': 'english',
+        'اللغة الانكليزية': 'english', 'اللغة الإنكليزية': 'english',
+        'اللغة الانجليزية': 'english', 'اللغة الإنجليزية': 'english',
+        'رياضيات': 'math', 'الرياضيات': 'math',
+        'علوم': 'science', 'العلوم': 'science',
+        'اجتماعيات': 'social', 'الاجتماعيات': 'social',
+        'اخلاقية': 'ethics', 'أخلاقية': 'ethics', 'الاخلاقية': 'ethics', 'الأخلاقية': 'ethics', 'التربية الاخلاقية': 'ethics', 'التربية الأخلاقية': 'ethics',
+        'رياضة': 'sport', 'الرياضة': 'sport', 'التربية الرياضية': 'sport',
+        'فنية': 'art', 'الفنية': 'art', 'التربية الفنية': 'art'
+      };
 
       const detailFieldMap = {
         'يومي ف1': 'daily1', 'يومي 1': 'daily1', 'شهر1 ف1': 'm1', 'شهر 1 ف1': 'm1', 'شهر2 ف1': 'm2', 'شهر 2 ف1': 'm2',
@@ -4725,7 +4724,7 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
         'آخر السنة': 'final', 'اخر السنة': 'final', 'الامتحان النهائي': 'final', 'درجة آخر السنة': 'final'
       };
 
-      let headerRowIdx = -1, nameCol = -1, regCol = -1;
+      let headerRowIdx = -1, nameCol = -1, regCol = -1, gradeCol = -1;
       const colToSubject = {};
       const colToDetailField = {};
 
@@ -4738,6 +4737,8 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
           if (str.includes('اسم الطالب') || str.includes('اسم التلميذ') || str === 'الاسم' || str === 'اسم الطالب/ة') {
             nameCol = cIdx;
             headerRowIdx = r;
+          } else if (str.includes('الصف') || str === 'المرحلة') {
+            gradeCol = cIdx;
           } else if (str.includes('القيد') || str.includes('التسلسل') || str === 'ت') {
             regCol = cIdx;
           } else if (forcedSubjectId && detailFieldMap[str]) {
@@ -4745,6 +4746,9 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
             headerRowIdx = r;
           } else if (forcedSubjectId && (str.includes('الدرجة النهائية') || str.includes('المعدل النهائي'))) {
             colToSubject[cIdx] = forcedSubjectId;
+            headerRowIdx = r;
+          } else if (subjectMap[str]) {
+            colToSubject[cIdx] = subjectMap[str];
             headerRowIdx = r;
           } else {
             for (let sName in subjectMap) {
@@ -4760,25 +4764,17 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
         if (nameCol !== -1 && (Object.keys(colToSubject).length > 0 || Object.keys(colToDetailField).length > 0 || forcedSubjectId)) break;
       }
 
-      if (nameCol === -1 && regCol === -1) { nameCol = 1; regCol = 0; }
+      if (nameCol === -1) nameCol = 1;
 
-      if (forcedSubjectId && Object.keys(colToSubject).length === 0 && Object.keys(colToDetailField).length === 0) {
-        for (let r = (headerRowIdx !== -1 ? headerRowIdx + 1 : 1); r < Math.min(jsonRows.length, 5); r++) {
-          const row = jsonRows[r];
-          if (!row) continue;
-          row.forEach((cell, cIdx) => {
-            if (cIdx !== nameCol && cIdx !== regCol && !isNaN(Number(cell)) && cell !== '') {
-              colToSubject[cIdx] = forcedSubjectId;
-            }
-          });
-          if (Object.keys(colToSubject).length > 0) break;
-        }
-      }
-
-      const studentMapByName = {}, studentMapByReg = {};
+      // خرائط ذكية لمطابقة الطلاب بالاسم والصف الدراسي معاً لمنع أي تداخل
+      const studentMapByGradeAndName = {};
+      const studentMapByNameList = {};
       (appData.students || []).forEach(st => {
-        studentMapByName[normalizeStudentName(st.name)] = st;
-        if (st.reg) studentMapByReg[String(st.reg).trim()] = st;
+        const norm = typeof normalizeStudentName === 'function' ? normalizeStudentName(st.name) : String(st.name || '').trim();
+        const gKey = String(st.grade || '1').trim();
+        studentMapByGradeAndName[`${gKey}::${norm}`] = st;
+        if (!studentMapByNameList[norm]) studentMapByNameList[norm] = [];
+        studentMapByNameList[norm].push(st);
       });
 
       let updatedStudentsCount = 0, updatedMarksCount = 0;
@@ -4786,29 +4782,59 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
       if (!appData.grades) appData.grades = {};
       if (!appData.subjectDetails) appData.subjectDetails = {};
 
+      const currentActiveGrade = appData.config?.activeGrade || '1';
+
       for (let r = startRow; r < jsonRows.length; r++) {
         const row = jsonRows[r];
         if (!Array.isArray(row) || row.length === 0) continue;
 
-        let matchedStudent = null;
-        if (regCol !== -1 && row[regCol] !== undefined) {
-          const regStr = String(row[regCol]).trim();
-          if (studentMapByReg[regStr]) matchedStudent = studentMapByReg[regStr];
+        const rawName = nameCol !== -1 && row[nameCol] !== undefined ? String(row[nameCol]).trim() : '';
+        if (!rawName || rawName.length < 3 || rawName.includes('اسم الطالب') || rawName.includes('إجمالي') || rawName.includes('ملخص')) continue;
+
+        let rowGrade = '';
+        if (gradeCol !== -1 && row[gradeCol] !== undefined) {
+          const gStr = String(row[gradeCol]).trim();
+          if (gStr.includes('أول') || gStr === '1') rowGrade = '1';
+          else if (gStr.includes('ثاني') || gStr === '2') rowGrade = '2';
+          else if (gStr.includes('ثالث') || gStr === '3') rowGrade = '3';
+          else if (gStr.includes('رابع') || gStr === '4') rowGrade = '4';
+          else if (gStr.includes('خامس') || gStr === '5') rowGrade = '5';
+          else if (gStr.includes('سادس') || gStr === '6') rowGrade = '6';
         }
-        if (!matchedStudent && nameCol !== -1 && row[nameCol]) {
-          const normName = normalizeStudentName(String(row[nameCol]).trim());
-          if (studentMapByName[normName]) matchedStudent = studentMapByName[normName];
-          else {
-            for (let k in studentMapByName) {
-              if (k.startsWith(normName) || normName.startsWith(k)) { matchedStudent = studentMapByName[k]; break; }
+
+        const normName = typeof normalizeStudentName === 'function' ? normalizeStudentName(rawName) : rawName;
+        let matchedStudent = null;
+
+        // 1. المطابقة الدقيقة بالصف والاسم
+        if (rowGrade && studentMapByGradeAndName[`${rowGrade}::${normName}`]) {
+          matchedStudent = studentMapByGradeAndName[`${rowGrade}::${normName}`];
+        }
+        // 2. المطابقة بالصف النشط حالياً
+        else if (studentMapByGradeAndName[`${currentActiveGrade}::${normName}`]) {
+          matchedStudent = studentMapByGradeAndName[`${currentActiveGrade}::${normName}`];
+        }
+        // 3. المطابقة بقائمة الأسماء
+        else if (studentMapByNameList[normName] && studentMapByNameList[normName].length > 0) {
+          matchedStudent = rowGrade
+            ? studentMapByNameList[normName].find(s => String(s.grade) === rowGrade) || studentMapByNameList[normName][0]
+            : studentMapByNameList[normName].find(s => String(s.grade) === currentActiveGrade) || studentMapByNameList[normName][0];
+        }
+        // 4. مطابقة تقريبية بالاسم
+        else {
+          for (let k in studentMapByNameList) {
+            if (k.startsWith(normName) || normName.startsWith(k)) {
+              matchedStudent = studentMapByNameList[k][0];
+              break;
             }
           }
         }
+
         if (!matchedStudent) continue;
 
         let stHasUpdate = false;
         if (!appData.grades[matchedStudent.id]) appData.grades[matchedStudent.id] = {};
 
+        // تفاصيل المادة المفردة
         if (forcedSubjectId && Object.keys(colToDetailField).length > 0) {
           if (!appData.subjectDetails[forcedSubjectId]) appData.subjectDetails[forcedSubjectId] = {};
           if (!appData.subjectDetails[forcedSubjectId][matchedStudent.id]) appData.subjectDetails[forcedSubjectId][matchedStudent.id] = {};
@@ -4826,8 +4852,14 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
           }
         }
 
+        // تفريغ درجات كافة المواد
+        const stGradeStr = String(matchedStudent.grade || '1');
         for (let colIdx in colToSubject) {
-          const subId = colToSubject[colIdx];
+          let subId = colToSubject[colIdx];
+          // تصحيح ذكي لمادة القراءة واللغة العربية حسب مرحلة الطالب
+          if (['1', '2', '3'].includes(stGradeStr) && subId === 'arabic') subId = 'reading';
+          if (['4', '5', '6'].includes(stGradeStr) && subId === 'reading') subId = 'arabic';
+
           const rawMark = row[colIdx];
           if (rawMark !== undefined && rawMark !== null && rawMark !== '' && !isNaN(Number(rawMark))) {
             const markNum = Math.min(100, Math.max(0, Math.round(Number(rawMark))));
@@ -4841,13 +4873,14 @@ function handleExcelGradesUpload(event, forcedSubjectId = null) {
       }
 
       if (updatedStudentsCount > 0) {
-        saveData();
+        if (typeof saveData === 'function') saveData();
         if (typeof renderGradesSheet === 'function') renderGradesSheet();
         if (typeof renderAll === 'function') renderAll();
         if (typeof renderSubjectDetailTable === 'function' && forcedSubjectId) renderSubjectDetailTable();
+        if (typeof scheduleCloudPush === 'function') scheduleCloudPush();
         alert(`🎉 نجاح تام!\nتم استيراد وتحديث درجات (${updatedStudentsCount}) طالب بنجاح.\nإجمالي الدرجات المرصودة: (${updatedMarksCount}) درجة.`);
       } else {
-        alert('⚠️ لم يتم العثور على طلبة مطابقين للأسماء أو أرقام القيود في الملف، يرجى التأكد من مطابقة أسماء الطلبة.');
+        alert('⚠️ لم يتم العثور على طلبة مطابقين للأسماء أو الصفوف في الملف، يرجى التأكد من مطابقة أسماء الطلبة.');
       }
     } catch (err) {
       alert('خطأ أثناء قراءة ملف الإكسل: ' + err.message);
