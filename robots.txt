@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://aliblueprints410-svg.github.io/Mizan_School_System/sitemap.xml
