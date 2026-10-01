@@ -45,9 +45,9 @@ function escapeHtml(str) {
 const ACTIVE_LEVEL_KEY = 'SCHOOL_SYSTEM_ACTIVE_LEVEL';
 const SYSTEM_VERSION = 'v 1.0.6';
 const DEVELOPER_INFO = {
-  name: 'علي',
+  name: 'م. علي محمد',
   telegram: 'https://t.me/Ali_Muhammed_410',
-  whatsapp: 'eng.ali410'
+  whatsapp: 'https://wa.me/9647749509636'
 };
 
 function getSchoolGenderPolicy() {
